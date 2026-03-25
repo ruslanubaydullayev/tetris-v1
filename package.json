@@ -1,0 +1,12 @@
+{
+  "name": "classic-2d-games",
+  "version": "1.0.0",
+  "description": "Simple, user-friendly website to play classic 2D games in the browser.",
+  "private": true,
+  "scripts": {
+    "start": "npx serve .",
+    "build": "echo \"Static site – nothing to build\""
+  },
+  "devDependencies": {}
+}
+
