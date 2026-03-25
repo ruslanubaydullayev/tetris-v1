@@ -396,6 +396,9 @@ function createBlocksMode() {
     const rows = state.clearing.rows.slice().sort((a, b) => b - a);
     for (const y of rows) {
       state.board.splice(y, 1);
+    }
+    // Add empty rows back only after all splices, otherwise indices shift.
+    for (let i = 0; i < rows.length; i++) {
       state.board.unshift(new Array(TETRIS.COLS).fill(null));
     }
 
