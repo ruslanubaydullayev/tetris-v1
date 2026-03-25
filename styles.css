@@ -402,6 +402,9 @@ canvas {
   min-width: 3.7rem;
   text-transform: uppercase;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
 }
 
 .mctrl-secondary {
