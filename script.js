@@ -356,29 +356,66 @@ function createBlocksMode() {
     return true;
   }
 
-  function clearLines() {
-    let cleared = 0;
+  function findFullRows() {
+    const fullRows = [];
     for (let y = TETRIS.ROWS - 1; y >= 0; y--) {
-      if (state.board[y].every((cell) => cell !== null)) {
-        state.board.splice(y, 1);
-        state.board.unshift(new Array(TETRIS.COLS).fill(null));
-        cleared++;
-        y++;
-      }
+      if (state.board[y].every((cell) => cell !== null)) fullRows.push(y);
     }
-    if (cleared > 0) {
-      state.lines += cleared;
-      const base = cleared === 1 ? 100 : cleared === 2 ? 300 : cleared === 3 ? 500 : 800;
-      state.score += base * state.level;
-      state.level = 1 + Math.floor(state.lines / 10);
-      state.dropSpeed = Math.max(120, TETRIS.BASE_SPEED - (state.level - 1) * 60);
-      const isAllClear = state.board.every((row) => row.every((cell) => cell === null));
-      if (isAllClear) {
-        state.score += 500;
-        showGameToast("Awesome! Perfect clear!");
-      }
+    return fullRows;
+  }
+
+  function startLineClear() {
+    const fullRows = findFullRows();
+    if (fullRows.length === 0) return false;
+
+    state.clearing = {
+      rows: fullRows.slice(),
+      t: 0,
+      duration: 240,
+    };
+
+    const cleared = fullRows.length;
+    state.lines += cleared;
+    const base =
+      cleared === 1 ? 100 : cleared === 2 ? 300 : cleared === 3 ? 500 : 800;
+    state.score += base * state.level;
+    state.level = 1 + Math.floor(state.lines / 10);
+    state.dropSpeed = Math.max(
+      120,
+      TETRIS.BASE_SPEED - (state.level - 1) * 60
+    );
+
+    updateScore(state.score);
+    updateDashboardStats(state.level, state.score, state.lines);
+    return true;
+  }
+
+  function finishLineClear() {
+    if (!state.clearing) return;
+
+    const rows = state.clearing.rows.slice().sort((a, b) => b - a);
+    for (const y of rows) {
+      state.board.splice(y, 1);
+      state.board.unshift(new Array(TETRIS.COLS).fill(null));
+    }
+
+    const isAllClear = state.board.every((row) =>
+      row.every((cell) => cell === null)
+    );
+    if (isAllClear) {
+      state.score += 500;
       updateScore(state.score);
       updateDashboardStats(state.level, state.score, state.lines);
+      showGameToast("Awesome! Perfect clear!");
+    }
+
+    const spawnPiece = state.pieceAfterClear;
+    state.pieceAfterClear = null;
+    state.clearing = null;
+    if (spawnPiece) state.piece = spawnPiece;
+
+    if (!canMove(state.piece, 0, 0)) {
+      endGame("Blocks reached the top.");
     }
   }
 
@@ -391,15 +428,23 @@ function createBlocksMode() {
     }
     // Reward every successful landing so score always progresses.
     state.score += 10;
-    clearLines();
     updateScore(state.score);
     updateDashboardStats(state.level, state.score, state.lines);
+
+    // If lines are full, animate them before spawning the next piece.
+    const hasClear = startLineClear();
+    if (hasClear) {
+      state.pieceAfterClear = state.nextPiece;
+      state.nextPiece = randomPiece();
+      drawNextPiece(state.nextPiece);
+      return;
+    }
+
+    // No clear: spawn next immediately.
     state.piece = state.nextPiece;
     state.nextPiece = randomPiece();
     drawNextPiece(state.nextPiece);
-    if (!canMove(state.piece, 0, 0)) {
-      endGame("Blocks reached the top.");
-    }
+    if (!canMove(state.piece, 0, 0)) endGame("Blocks reached the top.");
   }
 
   function ghostOffset() {
@@ -429,11 +474,20 @@ function createBlocksMode() {
       state.dropSpeed = TETRIS.BASE_SPEED;
       state.tick = 0;
       state.bag = [];
+      state.clearing = null;
+      state.pieceAfterClear = null;
       updateScore(0);
       updateDashboardStats(state.level, state.score, state.lines);
       drawNextPiece(state.nextPiece);
     },
     update(deltaMs) {
+      if (state.clearing) {
+        state.clearing.t += deltaMs;
+        if (state.clearing.t >= state.clearing.duration) {
+          finishLineClear();
+        }
+        return;
+      }
       state.tick += deltaMs;
       if (state.tick < state.dropSpeed) return;
       state.tick = 0;
@@ -449,24 +503,57 @@ function createBlocksMode() {
           drawRectCell(x, y, TETRIS.COLS, TETRIS.COLORS[cell], "rgba(15,23,42,0.85)");
         }
       }
-      const g = ghostOffset();
-      if (g > 0) {
-        for (const block of state.piece.blocks) {
-          const gx = state.piece.x + block.x;
-          const gy = state.piece.y + block.y + g;
-          if (gy >= 0) {
-            ctx.fillStyle = `${TETRIS.COLORS[state.piece.type]}33`;
-            ctx.strokeStyle = `${TETRIS.COLORS[state.piece.type]}99`;
-            ctx.setLineDash([4, 3]);
-            drawRectCell(gx, gy, TETRIS.COLS, `${TETRIS.COLORS[state.piece.type]}33`, `${TETRIS.COLORS[state.piece.type]}99`);
-            ctx.setLineDash([]);
+
+      if (state.clearing) {
+        const p = Math.max(
+          0,
+          Math.min(1, state.clearing.t / state.clearing.duration)
+        );
+        const alpha = 0.15 + (1 - p) * 0.45;
+        const shake = Math.round(Math.sin(state.clearing.t / 18) * (1 - p) * 2);
+
+        ctx.save();
+        ctx.translate(shake, 0);
+
+        const cell = canvas.width / TETRIS.COLS;
+        for (const rowY of state.clearing.rows) {
+          const py = rowY * cell;
+          ctx.fillStyle = `rgba(34,197,94,${alpha})`;
+          ctx.fillRect(1, py + 1, canvas.width - 2, cell - 2);
+
+          ctx.strokeStyle = `rgba(34,197,94,${alpha * 1.2})`;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(1, py + 1, canvas.width - 2, cell - 2);
+        }
+
+        ctx.restore();
+      } else {
+        const g = ghostOffset();
+        if (g > 0) {
+          for (const block of state.piece.blocks) {
+            const gx = state.piece.x + block.x;
+            const gy = state.piece.y + block.y + g;
+            if (gy >= 0) {
+              ctx.fillStyle = `${TETRIS.COLORS[state.piece.type]}33`;
+              ctx.strokeStyle = `${TETRIS.COLORS[state.piece.type]}99`;
+              ctx.setLineDash([4, 3]);
+              drawRectCell(
+                gx,
+                gy,
+                TETRIS.COLS,
+                `${TETRIS.COLORS[state.piece.type]}33`,
+                `${TETRIS.COLORS[state.piece.type]}99`
+              );
+              ctx.setLineDash([]);
+            }
           }
         }
-      }
-      for (const block of state.piece.blocks) {
-        const x = state.piece.x + block.x;
-        const y = state.piece.y + block.y;
-        if (y >= 0) drawRectCell(x, y, TETRIS.COLS, TETRIS.COLORS[state.piece.type]);
+        for (const block of state.piece.blocks) {
+          const x = state.piece.x + block.x;
+          const y = state.piece.y + block.y;
+          if (y >= 0)
+            drawRectCell(x, y, TETRIS.COLS, TETRIS.COLORS[state.piece.type]);
+        }
       }
       drawGrid(TETRIS.COLS, TETRIS.ROWS);
     },
