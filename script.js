@@ -371,7 +371,7 @@ function createBlocksMode() {
     state.clearing = {
       rows: fullRows.slice(),
       t: 0,
-      duration: 240,
+      duration: 300,
     };
 
     const cleared = fullRows.length;
