@@ -364,6 +364,8 @@ body {
 .mobile-canvas-stack {
   position: relative;
   display: inline-block;
+  width: 85%;
+  max-width: 375px;
 }
 
 .mctrl-side {
@@ -686,9 +688,9 @@ canvas {
     display: none;
   }
 
-  /* Board + flank buttons: shrink canvas on very narrow screens */
+  /* Left/right flank buttons removed => use more width */
   #gameCanvas {
-    max-width: min(220px, calc(100vw - 6.75rem));
+    max-width: min(375px, calc(100vw - 1rem));
   }
 
   .mobile-controls {

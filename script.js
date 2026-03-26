@@ -1201,6 +1201,7 @@ function bindMobileDragToLandOnCanvas() {
 
   const DRAG_STEP_PX = 22; // "grid" between repeated moves
   const HARD_DROP_PX = 140; // threshold to hard drop on release
+  const TAP_MAX_PX = 16; // keep small gesture => treat as tap
 
   let active = false;
   let pointerId = null;
@@ -1291,9 +1292,17 @@ function bindMobileDragToLandOnCanvas() {
     if (event.pointerId !== pointerId) return;
 
     const dy = event.clientY - startY;
+    const dx = event.clientX - startX;
     // If the user dragged down far enough, perform a hard drop on release.
     if (dy >= HARD_DROP_PX) {
       dispatchTetrisKey(" ");
+    } else {
+      const absDx = Math.abs(dx);
+      const absDy = Math.abs(dy);
+      // Small tap => rotate once (mobile-only).
+      if (absDx <= TAP_MAX_PX && absDy <= TAP_MAX_PX) {
+        dispatchTetrisKey("arrowup");
+      }
     }
 
     reset();
