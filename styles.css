@@ -713,5 +713,11 @@ canvas {
     flex-wrap: wrap;
     width: 100%;
   }
+
+  /* Make the single "Drop" button take full width */
+  #mHardDrop {
+    width: 100%;
+    flex: 1;
+  }
 }
 
