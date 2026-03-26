@@ -348,7 +348,33 @@ body {
 
 .game-wrapper {
   position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.mobile-play-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.mobile-canvas-stack {
+  position: relative;
   display: inline-block;
+}
+
+.mctrl-side {
+  display: none;
+  flex-shrink: 0;
+  align-self: stretch;
+  min-width: 2.75rem;
+  padding: 0.5rem 0.4rem;
+  min-height: 4.5rem;
+  align-items: center;
+  justify-content: center;
 }
 
 .game-toast {
@@ -414,6 +440,7 @@ canvas {
 .overlay {
   position: absolute;
   inset: 0;
+  z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -438,6 +465,13 @@ canvas {
   margin: 0 0 0.8rem;
   font-size: 0.9rem;
   color: #475569;
+}
+
+.overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
 }
 
 .primary-button {
@@ -652,9 +686,9 @@ canvas {
     display: none;
   }
 
-  /* Make canvas smaller so buttons remain visible */
+  /* Board + flank buttons: shrink canvas on very narrow screens */
   #gameCanvas {
-    max-width: 240px;
+    max-width: min(220px, calc(100vw - 6.75rem));
   }
 
   .mobile-controls {
@@ -665,6 +699,16 @@ canvas {
     min-width: 3.1rem;
     padding: 0.45rem 0.5rem;
     font-size: 0.95rem;
+  }
+
+  .mctrl-side {
+    display: flex;
+  }
+
+  .mobile-row-bottom {
+    justify-content: center;
+    flex-wrap: wrap;
+    width: 100%;
   }
 }
 

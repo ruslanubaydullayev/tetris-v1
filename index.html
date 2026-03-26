@@ -70,23 +70,60 @@
 
           <section class="game-area center-board">
             <div class="game-wrapper" aria-live="polite">
-              <canvas
-                id="gameCanvas"
-                width="200"
-                height="400"
-                aria-label="Tetris-style block game area"
-              ></canvas>
-              <div id="gameToast" class="game-toast" hidden></div>
+              <div class="mobile-play-row">
+                <button
+                  id="mLeft"
+                  class="mctrl mctrl-side"
+                  type="button"
+                  aria-label="Left"
+                >
+                  &#8592;
+                </button>
+                <div class="mobile-canvas-stack">
+                  <canvas
+                    id="gameCanvas"
+                    width="200"
+                    height="400"
+                    aria-label="Tetris-style block game area"
+                  ></canvas>
+                  <div id="gameToast" class="game-toast" hidden></div>
+                  <div class="overlay" id="overlay" hidden>
+                    <div class="overlay-card">
+                      <h3 id="overlayTitle">Game over</h3>
+                      <p id="overlayMessage">Press R to restart.</p>
+                      <div class="overlay-actions">
+                        <button
+                          id="overlayPlayButton"
+                          type="button"
+                          class="primary-button"
+                          aria-label="Resume game"
+                          hidden
+                        >
+                          Play
+                        </button>
+                        <button id="restartButton" type="button" class="primary-button">
+                          Restart
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <button
+                  id="mRight"
+                  class="mctrl mctrl-side"
+                  type="button"
+                  aria-label="Right"
+                >
+                  &#8594;
+                </button>
+              </div>
 
               <div
                 class="mobile-controls"
                 id="mobileControls"
                 aria-label="Mobile controls"
               >
-                <div class="mobile-row">
-                  <button id="mLeft" class="mctrl" type="button" aria-label="Left">
-                    &#8592;
-                  </button>
+                <div class="mobile-row mobile-row-bottom">
                   <button
                     id="mRotate"
                     class="mctrl"
@@ -95,25 +132,18 @@
                   >
                     &#8635;
                   </button>
-                  <button id="mRight" class="mctrl" type="button" aria-label="Right">
-                    &#8594;
+                  <button id="mSoftDrop" class="mctrl" type="button">
+                    Down
+                  </button>
+                  <button id="mHardDrop" class="mctrl" type="button">
+                    Drop
                   </button>
                 </div>
                 <div class="mobile-row">
-                  <button id="mSoftDrop" class="mctrl" type="button">Down</button>
-                  <button id="mHardDrop" class="mctrl" type="button">Drop</button>
-                </div>
-                <div class="mobile-row">
-                  <button id="mPause" class="mctrl mctrl-secondary" type="button">Pause</button>
-                  <button id="mRestart" class="mctrl mctrl-secondary" type="button">Restart</button>
-                </div>
-              </div>
-
-              <div class="overlay" id="overlay" hidden>
-                <div class="overlay-card">
-                  <h3 id="overlayTitle">Game over</h3>
-                  <p id="overlayMessage">Press R to restart.</p>
-                  <button id="restartButton" class="primary-button">
+                  <button id="mPause" class="mctrl mctrl-secondary" type="button">
+                    Pause
+                  </button>
+                  <button id="mRestart" class="mctrl mctrl-secondary" type="button">
                     Restart
                   </button>
                 </div>

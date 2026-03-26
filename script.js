@@ -7,6 +7,7 @@ const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlayTitle");
 const overlayMessage = document.getElementById("overlayMessage");
 const restartButton = document.getElementById("restartButton");
+const overlayPlayButton = document.getElementById("overlayPlayButton");
 const gameTitle = document.getElementById("gameTitle");
 const controlsList = document.getElementById("controlsList");
 const dashboard = document.getElementById("dashboard");
@@ -198,23 +199,37 @@ function showGameToast(message) {
   }, 1400);
 }
 
-function showOverlay(title, message) {
+function showOverlay(title, message, opts = {}) {
   overlayTitle.textContent = title;
   overlayMessage.textContent = message;
   overlay.hidden = false;
   overlay.style.display = "flex";
+  const showPlay = Boolean(opts.showPlay);
+  if (overlayPlayButton) {
+    overlayPlayButton.hidden = !showPlay;
+    overlayPlayButton.style.display = showPlay ? "inline-block" : "none";
+  }
 }
 
 function hideOverlay() {
   overlay.hidden = true;
   overlay.style.display = "none";
+  if (overlayPlayButton) {
+    overlayPlayButton.hidden = true;
+    overlayPlayButton.style.display = "none";
+  }
 }
 
 function setPaused(isPaused) {
   if (activeState.gameOver) return;
   activeState.paused = isPaused;
+  if (mPause) {
+    mPause.textContent = isPaused ? "Play" : "Pause";
+  }
   if (isPaused) {
-    showOverlay("Paused", "Press P to resume or R to restart.");
+    showOverlay("Paused", "Press P to resume, or use Play. Restart starts a new game.", {
+      showPlay: true,
+    });
   } else {
     hideOverlay();
   }
@@ -858,6 +873,7 @@ function setMode(mode) {
   activeState.gameOver = false;
   closeNameModal();
   hideOverlay();
+  if (mPause) mPause.textContent = "Pause";
 
   const game = modes[mode];
   game.init();
@@ -871,6 +887,7 @@ function resetCurrentMode() {
   activeState.gameOver = false;
   closeNameModal();
   hideOverlay();
+  if (mPause) mPause.textContent = "Pause";
   game.init();
 }
 
@@ -909,6 +926,13 @@ restartButton.addEventListener("click", () => {
   resetCurrentMode();
 });
 
+if (overlayPlayButton) {
+  overlayPlayButton.addEventListener("click", () => {
+    if (!gameIsInteractive() || activeState.gameOver) return;
+    setPaused(false);
+  });
+}
+
 nameForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const rawName = playerNameInput.value.trim();
@@ -923,7 +947,8 @@ nameForm.addEventListener("submit", (event) => {
   closeNameModal();
   showOverlay(
     "Game over",
-    `${pendingGameOverMessage} ${playerName}, your score: ${activeState.score}. Press R to restart.`
+    `${pendingGameOverMessage} ${playerName}, your score: ${activeState.score}. Press R to restart.`,
+    { showPlay: false }
   );
 });
 
