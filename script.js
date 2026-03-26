@@ -15,6 +15,7 @@ const dashboard = document.getElementById("dashboard");
 const gameScreen = document.getElementById("gameScreen");
 const playGameButton = document.getElementById("playGameButton");
 const backToDashboardButton = document.getElementById("backToDashboardButton");
+const enableNotificationsButton = document.getElementById("enableNotificationsButton");
 const dashMenuLevel = document.getElementById("dashMenuLevel");
 const dashCurrentLevel = document.getElementById("dashCurrentLevel");
 const dashCurrentScore = document.getElementById("dashCurrentScore");
@@ -59,6 +60,8 @@ const HOLD_REPEAT_MS = 85;
 // Leaderboard API (Tetris)
 const API_BASE_URL = "https://activus.pythonanywhere.com";
 const LAST_SYNCED_USERNAME_KEY = "tetrisNBlockLastSyncedUsername";
+const LAST_REMINDER_NOTIFICATION_AT_KEY = "tetrisNBlockLastReminderNotificationAt";
+const REMINDER_COOLDOWN_MS = 1000 * 60 * 60 * 24; // once per day
 
 function normalizeUsername(username) {
   const s = String(username ?? "").trim();
@@ -68,6 +71,79 @@ function normalizeUsername(username) {
 function normalizeScoreNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+function notificationsSupported() {
+  return "Notification" in window;
+}
+
+async function registerServiceWorkerIfPossible() {
+  if (!("serviceWorker" in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.register("./sw.js");
+    return reg;
+  } catch (err) {
+    console.warn("Service worker registration failed:", err);
+    return null;
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!notificationsSupported()) return "unsupported";
+  if (Notification.permission === "granted") return "granted";
+  if (Notification.permission === "denied") return "denied";
+  try {
+    return await Notification.requestPermission();
+  } catch {
+    // Safari sometimes throws; treat as denied.
+    return "denied";
+  }
+}
+
+async function sendReminderNotification() {
+  if (!notificationsSupported()) return false;
+  if (Notification.permission !== "granted") return false;
+
+  const now = Date.now();
+  const lastAt = Number(localStorage.getItem(LAST_REMINDER_NOTIFICATION_AT_KEY) || 0);
+  if (now - lastAt < REMINDER_COOLDOWN_MS) return false;
+
+  const message = "Hey, don't you want beat record today?";
+
+  // Prefer SW notifications when available.
+  const reg = await registerServiceWorkerIfPossible();
+  if (reg && reg.showNotification) {
+    await reg.showNotification("Tetris", {
+      body: message,
+      tag: "tetris-reminder",
+      renotify: false,
+    });
+  } else {
+    new Notification("Tetris", { body: message });
+  }
+
+  localStorage.setItem(LAST_REMINDER_NOTIFICATION_AT_KEY, String(now));
+  return true;
+}
+
+function updateNotificationsButtonUi() {
+  if (!enableNotificationsButton) return;
+  if (!notificationsSupported()) {
+    enableNotificationsButton.textContent = "Notifications not supported";
+    enableNotificationsButton.disabled = true;
+    return;
+  }
+  const p = Notification.permission;
+  if (p === "granted") {
+    enableNotificationsButton.textContent = "Notifications enabled";
+    enableNotificationsButton.disabled = true;
+  } else if (p === "denied") {
+    enableNotificationsButton.textContent = "Notifications blocked";
+    enableNotificationsButton.disabled = true;
+  } else {
+    enableNotificationsButton.textContent = "Enable notifications";
+    enableNotificationsButton.disabled = false;
+  }
 }
 
 async function apiJson(path, options = {}) {
@@ -102,7 +178,7 @@ async function apiPostScore(username, score) {
   return apiJson("/api/scores", { method: "POST", body: { username, score } });
 }
 
-async function apiFetchTopScores(limit = 5) {
+async function apiFetchTopScores(limit = 10) {
   return apiJson(`/api/scores/top?limit=${encodeURIComponent(limit)}`);
 }
 
@@ -124,7 +200,7 @@ function renderHighScoresFromApiResults(results) {
   if (!highScoreList) return;
 
   const filled = (Array.isArray(results) ? results : [])
-    .slice(0, 5)
+    .slice(0, 10)
     .map((item) => {
       const u = item?.username ?? item?.user ?? item?.name ?? "PLAYER";
       const bestScore = item?.bestScore ?? item?.score ?? item?.value ?? 0;
@@ -135,14 +211,14 @@ function renderHighScoresFromApiResults(results) {
     });
 
   const padded = filled.concat(
-    Array.from({ length: Math.max(0, 5 - filled.length) }, () => ({
+    Array.from({ length: Math.max(0, 10 - filled.length) }, () => ({
       name: "---",
       score: 0,
     }))
   );
 
   highScoreList.innerHTML = padded
-    .slice(0, 5)
+    .slice(0, 10)
     .map((s) => `<li>${s.name} - ${s.score}</li>`)
     .join("");
 }
@@ -151,12 +227,12 @@ let leaderboardRefreshRequestId = 0;
 
 function showLeaderboardLoading() {
   if (!highScoreList) return;
-  highScoreList.innerHTML = Array.from({ length: 5 }, () => "<li>Loading...</li>").join(
+  highScoreList.innerHTML = Array.from({ length: 10 }, () => "<li>Loading...</li>").join(
     ""
   );
 }
 
-async function refreshLeaderboardFromApi(limit = 5) {
+async function refreshLeaderboardFromApi(limit = 10) {
   const requestId = ++leaderboardRefreshRequestId;
   showLeaderboardLoading();
 
@@ -270,7 +346,6 @@ function updateScore(value) {
 }
 
 function updateDashboardStats(level, score, lines) {
-  dashMenuLevel.textContent = String(level);
   dashCurrentLevel.textContent = String(level);
   dashCurrentScore.textContent = String(score);
   dashCurrentLines.textContent = String(lines);
@@ -290,12 +365,12 @@ function readHighScores() {
           return { name: "PLAYER", score: item };
         }
         return {
-          name: String(item?.name || "PLAYER").toUpperCase(),
+          name: String(item?.name || "PLAYER"),
           score: Number(item?.score) || 0,
         };
       })
       .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
+      .slice(0, 10);
   } catch {
     return [];
   }
@@ -304,13 +379,13 @@ function readHighScores() {
 function renderHighScores() {
   const scores = readHighScores();
   const filled = scores.concat(
-    Array.from({ length: Math.max(0, 5 - scores.length) }, () => ({
+    Array.from({ length: Math.max(0, 10 - scores.length) }, () => ({
       name: "---",
       score: 0,
     }))
   );
   highScoreList.innerHTML = filled
-    .slice(0, 5)
+    .slice(0, 10)
     .map((s) => `<li>${s.name} - ${s.score}</li>`)
     .join("");
 }
@@ -337,7 +412,7 @@ function saveHighScore(score, playerName) {
     score: Number(score) || 0,
   });
   scores.sort((a, b) => b.score - a.score);
-  localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores.slice(0, 5)));
+  localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores.slice(0, 10)));
 }
 
 function showGameToast(message) {
@@ -619,7 +694,7 @@ function createBlocksMode() {
     state.piece = state.nextPiece;
     state.nextPiece = randomPiece();
     drawNextPiece(state.nextPiece);
-    if (!canMove(state.piece, 0, 0)) endGame("Blocks reached the top.");
+    if (!canMove(state.piece, 0, 0)) endGame("You did very well!");
   }
 
   function ghostOffset() {
@@ -1138,7 +1213,7 @@ nameForm.addEventListener("submit", (event) => {
   closeNameModal();
   showOverlay(
     "Game over",
-    `${pendingGameOverMessage} ${playerName}, your score: ${score}. Press R to restart.`,
+    `${pendingGameOverMessage} You earned ${score} point. Just share to friend to challenge them. Press R to restart.`,
     { showPlay: false }
   );
 
@@ -1153,21 +1228,36 @@ nameForm.addEventListener("submit", (event) => {
       // If the player restarted quickly, don't overwrite the new screen.
       if (!activeState.gameOver) return;
 
-      const recentScores = historyScores.slice(0, 5).join(", ");
-      const recentText = recentScores ? ` Recent scores: ${recentScores}.` : "";
+      const topData = await apiFetchTopScores(10);
+      const topResults = Array.isArray(topData?.results)
+        ? topData.results
+        : [];
+
+      const lastBestScore =
+        topResults.length > 0
+          ? normalizeScoreNumber(
+              topResults[topResults.length - 1]?.bestScore ??
+                topResults[topResults.length - 1]?.score ??
+                0
+            )
+          : 0;
+      const isTop10 = topResults.length > 0 && bestScore >= lastBestScore;
+      const top10Text = isTop10
+        ? "Great, you are one of top-10 players 😇"
+        : "Try one more time to become top players 😅";
 
       showOverlay(
         "Game over",
-        `${pendingGameOverMessage} ${playerName}, your score: ${score}. Your best: ${bestScore}.${recentText} Press R to restart.`,
+        `${pendingGameOverMessage} You earned ${bestScore} point. ${top10Text}. Just share to friend to challenge them. Press R to restart.`,
         { showPlay: false }
       );
 
-      await refreshLeaderboardFromApi(5);
+      await refreshLeaderboardFromApi(10);
     } catch (err) {
       console.warn("Failed to sync score to API:", err);
       if (!activeState.gameOver) return;
       showGameToast("Leaderboard sync failed");
-      await refreshLeaderboardFromApi(5);
+      await refreshLeaderboardFromApi(10);
     }
   })();
 });
@@ -1366,6 +1456,25 @@ if (mRestart) {
 
 bindMobileDragToLandOnCanvas();
 
+if (enableNotificationsButton) {
+  updateNotificationsButtonUi();
+  enableNotificationsButton.addEventListener("click", async () => {
+    const permission = await requestNotificationPermission();
+    updateNotificationsButtonUi();
+    if (permission === "granted") {
+      await sendReminderNotification();
+    }
+  });
+}
+
+// Try sending a reminder occasionally (only if user already granted permission).
+setInterval(() => {
+  if (Notification?.permission !== "granted") return;
+  // Only nudge when user is on the dashboard (not mid-game).
+  if (!gameScreen || !gameScreen.classList.contains("hidden")) return;
+  void sendReminderNotification();
+}, 1000 * 60 * 30);
+
 // Prevent page scroll while playing on mobile
 window.addEventListener(
   "touchmove",
@@ -1392,7 +1501,7 @@ modes.blocks = createBlocksMode();
 closeNameModal();
 setMode("blocks");
 showLeaderboardLoading(); // wait for remote leaderboard
-void refreshLeaderboardFromApi(5); // remote leaderboard
+void refreshLeaderboardFromApi(10); // remote leaderboard
 if (loopId) cancelAnimationFrame(loopId);
 loopId = requestAnimationFrame(frame);
 

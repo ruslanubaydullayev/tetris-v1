@@ -14,7 +14,7 @@
     <header class="site-header">
       <div class="container header-inner">
         <h1 class="site-title">Tetris</h1>
-        <p class="site-tagline">All games made of blocks – simple, 2D, addictive.</p>
+        <p class="site-tagline">Simple, 2D, addictive.</p>
       </div>
     </header>
 
@@ -22,7 +22,12 @@
       <section class="dashboard" id="dashboard" aria-label="Tetris dashboard">
         <div class="dashboard-left">
           <button id="playGameButton" class="dash-play">Play Game</button>
-          <div class="dash-level">Level: <span id="dashMenuLevel">1</span></div>
+         <span id="dashMenuLevel"></span>
+
+          <button id="enableNotificationsButton" class="dash-play dash-notify" type="button">
+            Enable notifications
+          </button>
+        </div>
 
           <section class="dash-highscores" aria-label="High scores">
             <h3>High Scores</h3>
