@@ -374,7 +374,8 @@ function hideOverlay() {
 function goToMenu() {
   closeNameModal();
   hideOverlay();
-  activeState.paused = false;
+  // Prevent the game loop from resuming and re-triggering endGame().
+  activeState.paused = true;
   activeState.gameOver = false;
   gameScreen.classList.add("hidden");
   dashboard.classList.remove("hidden");
@@ -1099,13 +1100,17 @@ restartButton.addEventListener("click", () => {
 });
 
 if (goToMenuButton) {
-  goToMenuButton.addEventListener("click", () => {
+  goToMenuButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     goToMenu();
   });
 }
 
 if (nameModalGoToMenuButton) {
-  nameModalGoToMenuButton.addEventListener("click", () => {
+  nameModalGoToMenuButton.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
     goToMenu();
   });
 }
@@ -1367,6 +1372,17 @@ window.addEventListener(
   (event) => {
     if (!gameScreen || gameScreen.classList.contains("hidden")) return;
     if (!nameModal || !nameModal.hidden) return;
+
+    // Only prevent scroll when the user is interacting with the game UI.
+    // This keeps the page scrollable in other situations (including over modal).
+    const target = event.target;
+    const inCanvas = canvas && (target === canvas || canvas.contains(target));
+    const inControls =
+      target &&
+      typeof target.closest === "function" &&
+      target.closest(".mobile-controls");
+
+    if (!inCanvas && !inControls) return;
     event.preventDefault();
   },
   { passive: false }
