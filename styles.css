@@ -364,8 +364,9 @@ body {
 .mobile-canvas-stack {
   position: relative;
   display: inline-block;
-  width: 85%;
+  width: 70%;
   max-width: 375px;
+  user-select: none;
 }
 
 .mctrl-side {
