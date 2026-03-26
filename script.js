@@ -239,9 +239,26 @@ const TETRIS = {
 };
 
 function resizeCanvasForGrid(cols, rows) {
-  canvas.width = 200;
-  const cell = canvas.width / cols;
-  canvas.height = Math.round(rows * cell);
+  // Use HiDPI bitmap sizing while keeping integer cell sizes to avoid
+  // fractional-pixel artifacts (which can make blocks look misaligned).
+  const dpr = Math.max(1, window.devicePixelRatio || 1);
+
+  const rect = canvas.getBoundingClientRect();
+  const displayWidth = rect.width && rect.width > 0 ? rect.width : 200;
+
+  const cellBitmapPx = Math.max(1, Math.round((displayWidth * dpr) / cols));
+  const targetBitmapWidth = cellBitmapPx * cols;
+  const targetBitmapHeight = cellBitmapPx * rows;
+
+  canvas.width = targetBitmapWidth;
+  canvas.height = targetBitmapHeight;
+
+  // Prevent CSS scaling blur/distortion by matching CSS size to the bitmap.
+  canvas.style.display = "block";
+  canvas.style.marginLeft = "auto";
+  canvas.style.marginRight = "auto";
+  canvas.style.width = `${targetBitmapWidth / dpr}px`;
+  canvas.style.height = `${targetBitmapHeight / dpr}px`;
 }
 
 function updateScore(value) {
