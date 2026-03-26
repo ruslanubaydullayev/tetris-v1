@@ -54,6 +54,139 @@ let rightHoldTimer = null;
 let softDropHoldTimer = null;
 const HOLD_REPEAT_MS = 85;
 
+// Leaderboard API (Tetris)
+const API_BASE_URL = "https://activus.pythonanywhere.com";
+const LAST_SYNCED_USERNAME_KEY = "tetrisNBlockLastSyncedUsername";
+
+function normalizeUsername(username) {
+  const s = String(username ?? "").trim();
+  return s ? s.slice(0, 16).toUpperCase() : "PLAYER";
+}
+
+function normalizeScoreNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+async function apiJson(path, options = {}) {
+  const { method = "GET", body = undefined } = options;
+
+  const headers = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `API request failed: ${method} ${path} (${res.status}) ${text}`
+    );
+  }
+
+  return res.json();
+}
+
+async function apiEnsureUser(username) {
+  return apiJson("/api/users", { method: "POST", body: { username } });
+}
+
+async function apiPostScore(username, score) {
+  return apiJson("/api/scores", { method: "POST", body: { username, score } });
+}
+
+async function apiFetchTopScores(limit = 5) {
+  return apiJson(`/api/scores/top?limit=${encodeURIComponent(limit)}`);
+}
+
+async function apiFetchUserBest(username) {
+  return apiJson(
+    `/api/users/${encodeURIComponent(username)}/best`
+  );
+}
+
+async function apiFetchUserScores(username, limit = 20) {
+  return apiJson(
+    `/api/users/${encodeURIComponent(username)}/scores?limit=${encodeURIComponent(
+      limit
+    )}`
+  );
+}
+
+function renderHighScoresFromApiResults(results) {
+  if (!highScoreList) return;
+
+  const filled = (Array.isArray(results) ? results : [])
+    .slice(0, 5)
+    .map((item) => {
+      const u = item?.username ?? item?.user ?? item?.name ?? "PLAYER";
+      const bestScore = item?.bestScore ?? item?.score ?? item?.value ?? 0;
+      return {
+        name: normalizeUsername(u),
+        score: normalizeScoreNumber(bestScore),
+      };
+    });
+
+  const padded = filled.concat(
+    Array.from({ length: Math.max(0, 5 - filled.length) }, () => ({
+      name: "---",
+      score: 0,
+    }))
+  );
+
+  highScoreList.innerHTML = padded
+    .slice(0, 5)
+    .map((s) => `<li>${s.name} - ${s.score}</li>`)
+    .join("");
+}
+
+let leaderboardRefreshRequestId = 0;
+
+function showLeaderboardLoading() {
+  if (!highScoreList) return;
+  highScoreList.innerHTML = Array.from({ length: 5 }, () => "<li>Loading...</li>").join(
+    ""
+  );
+}
+
+async function refreshLeaderboardFromApi(limit = 5) {
+  const requestId = ++leaderboardRefreshRequestId;
+  showLeaderboardLoading();
+
+  try {
+    const data = await apiFetchTopScores(limit);
+    if (requestId !== leaderboardRefreshRequestId) return;
+    renderHighScoresFromApiResults(data?.results ?? []);
+  } catch (err) {
+    console.warn("Failed to refresh leaderboard from API:", err);
+    if (requestId !== leaderboardRefreshRequestId) return;
+    // Local fallback if API is down.
+    renderHighScores();
+  }
+}
+
+async function syncUserScoreWithApi(username, score) {
+  // Spec-listed order: ensure user, post score, then fetch best & history.
+  await apiEnsureUser(username);
+  const postRes = await apiPostScore(username, score);
+  const bestRes = await apiFetchUserBest(username);
+  const scoresRes = await apiFetchUserScores(username, 20);
+
+  const bestScore = normalizeScoreNumber(
+    bestRes?.bestScore ?? postRes?.bestScore
+  );
+  const historyScores = Array.isArray(scoresRes?.history)
+    ? scoresRes.history.map((h) => normalizeScoreNumber(h?.score))
+    : [];
+
+  return { bestScore, historyScores };
+}
+
 function gameIsInteractive() {
   if (!gameScreen || gameScreen.classList.contains("hidden")) return false;
   if (!nameModal || !nameModal.hidden) return false;
@@ -186,7 +319,6 @@ function saveHighScore(score, playerName) {
   });
   scores.sort((a, b) => b.score - a.score);
   localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores.slice(0, 5)));
-  renderHighScores();
 }
 
 function showGameToast(message) {
@@ -444,10 +576,6 @@ function createBlocksMode() {
       if (y < 0) return endGame("Blocks reached the top.");
       state.board[y][x] = state.piece.type;
     }
-    // Reward every successful landing so score always progresses.
-    state.score += 10;
-    updateScore(state.score);
-    updateDashboardStats(state.level, state.score, state.lines);
 
     // If lines are full, animate them before spawning the next piece.
     const hasClear = startLineClear();
@@ -582,7 +710,13 @@ function createBlocksMode() {
       } else if (key === "arrowright") {
         if (canMove(p, 1, 0)) p.x += 1;
       } else if (key === "arrowdown") {
-        if (canMove(p, 0, 1)) p.y += 1;
+        if (canMove(p, 0, 1)) {
+          p.y += 1;
+          // Soft drop: reward player for each manual downward step.
+          state.score += 1;
+          updateScore(state.score);
+          updateDashboardStats(state.level, state.score, state.lines);
+        }
       } else if (key === "arrowup") {
         if (p.type !== "O") {
           const r = p.blocks.map((b) => ({ x: -b.y, y: b.x }));
@@ -590,7 +724,17 @@ function createBlocksMode() {
         }
       } else if (key === " ") {
         event.preventDefault();
-        while (canMove(p, 0, 1)) p.y += 1;
+        // Hard drop: reward distance for each manual downward step.
+        let dropped = 0;
+        while (canMove(p, 0, 1)) {
+          p.y += 1;
+          dropped += 1;
+        }
+        if (dropped > 0) {
+          state.score += dropped * 2;
+          updateScore(state.score);
+          updateDashboardStats(state.level, state.score, state.lines);
+        }
         lockPiece();
       }
     },
@@ -943,13 +1087,44 @@ nameForm.addEventListener("submit", (event) => {
   }
 
   const playerName = rawName.slice(0, 16).toUpperCase();
-  saveHighScore(activeState.score, playerName);
+  const score = activeState.score;
+  saveHighScore(score, playerName);
+  localStorage.setItem(LAST_SYNCED_USERNAME_KEY, playerName);
   closeNameModal();
   showOverlay(
     "Game over",
-    `${pendingGameOverMessage} ${playerName}, your score: ${activeState.score}. Press R to restart.`,
+    `${pendingGameOverMessage} ${playerName}, your score: ${score}. Press R to restart.`,
     { showPlay: false }
   );
+
+  // Sync leaderboard in the background.
+  void (async () => {
+    try {
+      const { bestScore, historyScores } = await syncUserScoreWithApi(
+        playerName,
+        score
+      );
+
+      // If the player restarted quickly, don't overwrite the new screen.
+      if (!activeState.gameOver) return;
+
+      const recentScores = historyScores.slice(0, 5).join(", ");
+      const recentText = recentScores ? ` Recent scores: ${recentScores}.` : "";
+
+      showOverlay(
+        "Game over",
+        `${pendingGameOverMessage} ${playerName}, your score: ${score}. Your best: ${bestScore}.${recentText} Press R to restart.`,
+        { showPlay: false }
+      );
+
+      await refreshLeaderboardFromApi(5);
+    } catch (err) {
+      console.warn("Failed to sync score to API:", err);
+      if (!activeState.gameOver) return;
+      showGameToast("Leaderboard sync failed");
+      await refreshLeaderboardFromApi(5);
+    }
+  })();
 });
 
 playGameButton.addEventListener("click", () => {
@@ -1018,6 +1193,123 @@ bindMobileHold(mSoftDrop, "arrowdown", "soft");
 bindMobileTap(mRotate, "arrowup");
 bindMobileTap(mHardDrop, " ");
 
+// Touch drag controls on the canvas:
+// - Drag down: soft drop step-by-step
+// - Release after a strong downward drag: hard drop (landing)
+function bindMobileDragToLandOnCanvas() {
+  if (!canvas) return;
+
+  const DRAG_STEP_PX = 22; // "grid" between repeated moves
+  const HARD_DROP_PX = 140; // threshold to hard drop on release
+
+  let active = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let axis = null; // "x" | "y"
+  let lastXSteps = 0;
+  let lastYSteps = 0;
+
+  function signFloorSteps(v, stepPx) {
+    const abs = Math.abs(v);
+    if (abs < stepPx) return 0;
+    return Math.sign(v) * Math.floor(abs / stepPx);
+  }
+
+  function reset() {
+    active = false;
+    pointerId = null;
+    axis = null;
+    lastXSteps = 0;
+    lastYSteps = 0;
+  }
+
+  canvas.style.touchAction = "none";
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (event.pointerType !== "touch") return;
+    if (!gameIsInteractive()) return;
+    if (activeState.paused || activeState.gameOver) return;
+    if (event.button !== undefined && event.button !== 0) return;
+
+    active = true;
+    pointerId = event.pointerId;
+    startX = event.clientX;
+    startY = event.clientY;
+    axis = null;
+    lastXSteps = 0;
+    lastYSteps = 0;
+
+    try {
+      canvas.setPointerCapture(pointerId);
+    } catch {
+      // Ignore if capture fails
+    }
+
+    event.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!active) return;
+    if (event.pointerId !== pointerId) return;
+    if (!gameIsInteractive()) return;
+
+    event.preventDefault();
+
+    const dx = event.clientX - startX;
+    const dy = event.clientY - startY;
+
+    if (!axis) {
+      // Decide which axis drives motion based on the dominant gesture.
+      if (Math.abs(dx) >= DRAG_STEP_PX || Math.abs(dy) >= DRAG_STEP_PX) {
+        axis = Math.abs(dx) >= Math.abs(dy) ? "x" : "y";
+      }
+    }
+
+    if (axis === "y") {
+      const ySteps = signFloorSteps(dy, DRAG_STEP_PX);
+      const delta = ySteps - lastYSteps;
+      if (delta > 0) {
+        const stepsToApply = Math.min(delta, 8);
+        for (let i = 0; i < stepsToApply; i++) dispatchTetrisKey("arrowdown");
+        lastYSteps += stepsToApply;
+      }
+    } else {
+      const xSteps = signFloorSteps(dx, DRAG_STEP_PX);
+      const delta = xSteps - lastXSteps;
+      if (delta !== 0) {
+        const stepsToApply = Math.min(Math.abs(delta), 8);
+        const dirKey = delta > 0 ? "arrowright" : "arrowleft";
+        for (let i = 0; i < stepsToApply; i++) dispatchTetrisKey(dirKey);
+        lastXSteps += stepsToApply * (delta > 0 ? 1 : -1);
+      }
+    }
+  });
+
+  function onPointerEnd(event) {
+    if (!active) return;
+    if (event.pointerId !== pointerId) return;
+
+    const dy = event.clientY - startY;
+    // If the user dragged down far enough, perform a hard drop on release.
+    if (dy >= HARD_DROP_PX) {
+      dispatchTetrisKey(" ");
+    }
+
+    reset();
+    event.preventDefault();
+  }
+
+  canvas.addEventListener("pointerup", onPointerEnd);
+  canvas.addEventListener("pointercancel", onPointerEnd);
+  canvas.addEventListener("pointerleave", (e) => {
+    // If finger leaves the canvas while pressed, treat it as end.
+    if (!active) return;
+    if (e.pointerId !== pointerId) return;
+    onPointerEnd(e);
+  });
+}
+
 if (mPause) {
   mPause.addEventListener("click", () => {
     if (!gameIsInteractive()) return;
@@ -1031,6 +1323,8 @@ if (mRestart) {
     resetCurrentMode();
   });
 }
+
+bindMobileDragToLandOnCanvas();
 
 // Prevent page scroll while playing on mobile
 window.addEventListener(
@@ -1046,7 +1340,8 @@ window.addEventListener(
 modes.blocks = createBlocksMode();
 closeNameModal();
 setMode("blocks");
-renderHighScores();
+showLeaderboardLoading(); // wait for remote leaderboard
+void refreshLeaderboardFromApi(5); // remote leaderboard
 if (loopId) cancelAnimationFrame(loopId);
 loopId = requestAnimationFrame(frame);
 
