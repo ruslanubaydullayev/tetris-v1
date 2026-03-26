@@ -7,6 +7,7 @@ const overlay = document.getElementById("overlay");
 const overlayTitle = document.getElementById("overlayTitle");
 const overlayMessage = document.getElementById("overlayMessage");
 const restartButton = document.getElementById("restartButton");
+const goToMenuButton = document.getElementById("goToMenuButton");
 const overlayPlayButton = document.getElementById("overlayPlayButton");
 const gameTitle = document.getElementById("gameTitle");
 const controlsList = document.getElementById("controlsList");
@@ -31,6 +32,7 @@ const mPause = document.getElementById("mPause");
 const mRestart = document.getElementById("mRestart");
 const nameModal = document.getElementById("nameModal");
 const nameForm = document.getElementById("nameForm");
+const nameModalGoToMenuButton = document.getElementById("nameModalGoToMenuButton");
 const playerNameInput = document.getElementById("playerNameInput");
 const nameError = document.getElementById("nameError");
 const nameModalScore = document.getElementById("nameModalScore");
@@ -367,6 +369,15 @@ function hideOverlay() {
     overlayPlayButton.hidden = true;
     overlayPlayButton.style.display = "none";
   }
+}
+
+function goToMenu() {
+  closeNameModal();
+  hideOverlay();
+  activeState.paused = false;
+  activeState.gameOver = false;
+  gameScreen.classList.add("hidden");
+  dashboard.classList.remove("hidden");
 }
 
 function setPaused(isPaused) {
@@ -1087,6 +1098,18 @@ restartButton.addEventListener("click", () => {
   resetCurrentMode();
 });
 
+if (goToMenuButton) {
+  goToMenuButton.addEventListener("click", () => {
+    goToMenu();
+  });
+}
+
+if (nameModalGoToMenuButton) {
+  nameModalGoToMenuButton.addEventListener("click", () => {
+    goToMenu();
+  });
+}
+
 if (overlayPlayButton) {
   overlayPlayButton.addEventListener("click", () => {
     if (!gameIsInteractive() || activeState.gameOver) return;
@@ -1152,9 +1175,7 @@ playGameButton.addEventListener("click", () => {
 });
 
 backToDashboardButton.addEventListener("click", () => {
-  closeNameModal();
-  gameScreen.classList.add("hidden");
-  dashboard.classList.remove("hidden");
+  goToMenu();
 });
 
 // Mobile controls (touch)
@@ -1217,7 +1238,6 @@ function bindMobileDragToLandOnCanvas() {
   if (!canvas) return;
 
   const DRAG_STEP_PX = 22; // "grid" between repeated moves
-  const HARD_DROP_PX = 140; // threshold to hard drop on release
   const TAP_MAX_PX = 16; // keep small gesture => treat as tap
 
   let active = false;
@@ -1284,23 +1304,15 @@ function bindMobileDragToLandOnCanvas() {
       }
     }
 
-    if (axis === "y") {
-      const ySteps = signFloorSteps(dy, DRAG_STEP_PX);
-      const delta = ySteps - lastYSteps;
-      if (delta > 0) {
-        const stepsToApply = Math.min(delta, 8);
-        for (let i = 0; i < stepsToApply; i++) dispatchTetrisKey("arrowdown");
-        lastYSteps += stepsToApply;
-      }
-    } else {
-      const xSteps = signFloorSteps(dx, DRAG_STEP_PX);
-      const delta = xSteps - lastXSteps;
-      if (delta !== 0) {
-        const stepsToApply = Math.min(Math.abs(delta), 8);
-        const dirKey = delta > 0 ? "arrowright" : "arrowleft";
-        for (let i = 0; i < stepsToApply; i++) dispatchTetrisKey(dirKey);
-        lastXSteps += stepsToApply * (delta > 0 ? 1 : -1);
-      }
+    // Drag-down no longer performs soft-drop.
+    // (Keep horizontal drag movement if you drag mostly left/right.)
+    const xSteps = signFloorSteps(dx, DRAG_STEP_PX);
+    const delta = xSteps - lastXSteps;
+    if (delta !== 0) {
+      const stepsToApply = Math.min(Math.abs(delta), 8);
+      const dirKey = delta > 0 ? "arrowright" : "arrowleft";
+      for (let i = 0; i < stepsToApply; i++) dispatchTetrisKey(dirKey);
+      lastXSteps += stepsToApply * (delta > 0 ? 1 : -1);
     }
   });
 
@@ -1310,16 +1322,13 @@ function bindMobileDragToLandOnCanvas() {
 
     const dy = event.clientY - startY;
     const dx = event.clientX - startX;
-    // If the user dragged down far enough, perform a hard drop on release.
-    if (dy >= HARD_DROP_PX) {
-      dispatchTetrisKey(" ");
-    } else {
-      const absDx = Math.abs(dx);
-      const absDy = Math.abs(dy);
-      // Small tap => rotate once (mobile-only).
-      if (absDx <= TAP_MAX_PX && absDy <= TAP_MAX_PX) {
-        dispatchTetrisKey("arrowup");
-      }
+    const absDx = Math.abs(dx);
+    const absDy = Math.abs(dy);
+
+    // Small tap => rotate once (mobile-only).
+    // Larger drags are treated as movement/soft-drop only (no hard landing on release).
+    if (absDx <= TAP_MAX_PX && absDy <= TAP_MAX_PX) {
+      dispatchTetrisKey("arrowup");
     }
 
     reset();
