@@ -399,6 +399,12 @@ canvas {
   border-radius: 0;
   background: #b9c8df;
   border: 4px solid #1e293b;
+  /* Prevent browser text/selection drag artifacts on mobile */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-drag: none;
 }
 
 .mobile-controls {
