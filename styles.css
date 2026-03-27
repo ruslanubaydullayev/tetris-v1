@@ -543,6 +543,26 @@ canvas {
   text-align: center;
 }
 
+.footer-social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  justify-content: center;
+  align-items: center;
+  margin-top: 0.65rem;
+}
+
+.social-link {
+  color: #445782;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.social-link:hover {
+  color: #1e3a8a;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;
