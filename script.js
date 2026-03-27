@@ -171,7 +171,16 @@ async function apiJson(path, options = {}) {
 }
 
 async function apiEnsureUser(username) {
-  return apiJson("/api/users", { method: "POST", body: { username } });
+  try {
+    return await apiJson("/api/users", { method: "POST", body: { username } });
+  } catch (err) {
+    const message = String(err?.message || "");
+    // Existing user is okay; we only need the user to exist before posting score.
+    if (message.includes("(409)") || /already exists/i.test(message)) {
+      return { username, exists: true };
+    }
+    throw err;
+  }
 }
 
 async function apiPostScore(username, score) {
@@ -394,7 +403,7 @@ function openNameModal(score, message) {
   pendingGameOverMessage = message;
   nameModalScore.textContent = String(score);
   nameError.hidden = true;
-  playerNameInput.value = "";
+  playerNameInput.value = localStorage.getItem(LAST_SYNCED_USERNAME_KEY) || "";
   nameModal.hidden = false;
   nameModal.style.display = "flex";
   playerNameInput.focus();
@@ -474,6 +483,15 @@ function setPaused(isPaused) {
 function endGame(message) {
   activeState.gameOver = true;
   hideOverlay();
+  pendingGameOverMessage = message;
+  const remembered = String(
+    localStorage.getItem(LAST_SYNCED_USERNAME_KEY) || ""
+  ).trim();
+  if (remembered && /^[A-Za-z]/.test(remembered)) {
+    playerNameInput.value = remembered;
+    nameForm.requestSubmit();
+    return;
+  }
   openNameModal(activeState.score, message);
 }
 
