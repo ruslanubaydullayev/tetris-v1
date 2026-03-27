@@ -788,6 +788,11 @@ canvas {
     max-width: min(375px, calc(100vw - 1rem));
   }
 
+  /* Block Blast board can be larger on mobile */
+  .mode-blockblast #gameCanvas {
+    max-width: min(430px, calc(100vw - 0.4rem));
+  }
+
   /* Make overlay match the actual canvas box */
   .mobile-canvas-stack {
     width: fit-content;

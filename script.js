@@ -1384,7 +1384,9 @@ function createBlockBlastMode() {
 
   function updateDragHover(clientX, clientY) {
     if (!state.dragging) return;
-    const { col, row } = pointerToBoardCell(clientX, clientY);
+    const px = clientX + (state.dragging.pointerOffset?.x || 0);
+    const py = clientY + (state.dragging.pointerOffset?.y || 0);
+    const { col, row } = pointerToBoardCell(px, py);
     const targetCol = col - state.dragging.anchorBlock.x;
     const targetRow = row - state.dragging.anchorBlock.y;
     const valid = shapeFitsAt(state.dragging.shape, targetCol, targetRow);
@@ -1395,13 +1397,20 @@ function createBlockBlastMode() {
     };
   }
 
-  function startDragging(shapeIndex, anchorBlock) {
+  function startDragging(shapeIndex, anchorBlock, pointerType = "mouse") {
     const shape = state.shapes[shapeIndex];
     if (!shape) return;
+    const boardRect = canvas.getBoundingClientRect();
+    const cellPx = boardRect.width > 0 ? boardRect.width / COLS : 32;
+    const touchYOffset = -Math.max(28, Math.round(cellPx * 1.35));
     state.dragging = {
       shapeIndex,
       shape,
       anchorBlock,
+      pointerOffset: {
+        x: 0,
+        y: pointerType === "touch" ? touchYOffset : 0,
+      },
       hover: null,
     };
     drawShapeSlots();
@@ -1475,7 +1484,7 @@ function createBlockBlastMode() {
           }
         }
 
-        startDragging(shapeIndex, { x: best.x, y: best.y });
+        startDragging(shapeIndex, { x: best.x, y: best.y }, event.pointerType || "mouse");
         updateDragHover(event.clientX, event.clientY);
         event.preventDefault();
       });
@@ -1585,6 +1594,7 @@ function setMode(mode) {
   if (mobileControls) {
     mobileControls.classList.toggle("hidden", mode === "blockblast");
   }
+  document.body.classList.toggle("mode-blockblast", mode === "blockblast");
   if (playGameButton) {
     playGameButton.textContent = mode === "blockblast" ? "Play Block Blast" : "Play Tetris";
   }
