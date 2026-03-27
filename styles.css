@@ -123,8 +123,8 @@ body {
 
 .game-choice-thumb {
   width: 100%;
-  max-height: 76px;
-  object-fit: cover;
+  max-height: 112px;
+  object-fit: contain ;
   border: 2px solid #7386b0;
 }
 
@@ -405,6 +405,15 @@ body {
   width: 100%;
   max-width: 375px;
   user-select: none;
+}
+
+/* Block Blast: allow a visibly larger board (still capped for readability). */
+.mode-blockblast .mobile-canvas-stack {
+  max-width: min(calc(100vw - 1rem), 560px);
+}
+
+.mode-blockblast .blockblast-tray {
+  max-width: min(calc(100vw - 1rem), 560px);
 }
 
 .mctrl-side {
@@ -788,9 +797,14 @@ canvas {
     max-width: min(375px, calc(100vw - 1rem));
   }
 
-  /* Block Blast board can be larger on mobile */
+  /* Block Blast: stack spans usable width; canvas fills it */
+  .mode-blockblast .mobile-canvas-stack {
+    width: 100%;
+    max-width: min(calc(100vw - 0.75rem), 560px);
+  }
+
   .mode-blockblast #gameCanvas {
-    max-width: min(430px, calc(100vw - 0.4rem));
+    max-width: none;
   }
 
   /* Make overlay match the actual canvas box */

@@ -411,8 +411,14 @@ function resizeCanvasForGrid(cols, rows) {
   // fractional-pixel artifacts (which can make blocks look misaligned).
   const dpr = Math.max(1, window.devicePixelRatio || 1);
 
-  const rect = canvas.getBoundingClientRect();
-  const displayWidth = rect.width && rect.width > 0 ? rect.width : 200;
+  // Measure `.mobile-canvas-stack` when present so layout width follows CSS max-width
+  // (Block Blast can be wider on phone). The canvas often has an inline width from the
+  // previous pass; using the stack avoids getting stuck at a smaller size.
+  const stack = canvas.parentElement?.classList?.contains("mobile-canvas-stack")
+    ? canvas.parentElement
+    : null;
+  const layoutRect = stack ? stack.getBoundingClientRect() : canvas.getBoundingClientRect();
+  const displayWidth = layoutRect.width && layoutRect.width > 0 ? layoutRect.width : 200;
 
   const cellBitmapPx = Math.max(1, Math.round((displayWidth * dpr) / cols));
   const targetBitmapWidth = cellBitmapPx * cols;
@@ -620,6 +626,37 @@ function drawRectCell(col, row, cols, color, stroke = "rgba(15,23,42,1)") {
   ctx.stroke();
 }
 
+/** Squash/stretch a cell around its center (for line-clear animations). */
+function drawRectCellScaled(
+  col,
+  row,
+  cols,
+  color,
+  stroke,
+  scaleX,
+  scaleY
+) {
+  const cell = canvas.width / cols;
+  const x = col * cell;
+  const y = row * cell;
+  const cx = x + cell / 2;
+  const cy = y + cell / 2;
+  const sx = Math.max(0.06, scaleX);
+  const sy = Math.max(0.06, scaleY);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(sx, sy);
+  ctx.translate(-cx, -cy);
+  ctx.fillStyle = color;
+  ctx.strokeStyle = stroke;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.rect(x + 1, y + 1, cell - 2, cell - 2);
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawNextPiece(piece) {
   nextCtx.fillStyle = "#b9c8df";
   nextCtx.fillRect(0, 0, nextCanvas.width, nextCanvas.height);
@@ -727,7 +764,7 @@ function createBlocksMode() {
     state.clearing = {
       rows: fullRows.slice(),
       t: 0,
-      duration: 300,
+      duration: 380,
     };
 
     const cleared = fullRows.length;
@@ -851,10 +888,15 @@ function createBlocksMode() {
     },
     draw() {
       clearCanvas();
+      const clearingRowSet = state.clearing
+        ? new Set(state.clearing.rows)
+        : null;
+
       for (let y = 0; y < TETRIS.ROWS; y++) {
         for (let x = 0; x < TETRIS.COLS; x++) {
           const cell = state.board[y][x];
           if (!cell) continue;
+          if (clearingRowSet && clearingRowSet.has(y)) continue;
           drawRectCell(x, y, TETRIS.COLS, TETRIS.COLORS[cell], "rgba(15,23,42,0.85)");
         }
       }
@@ -864,21 +906,43 @@ function createBlocksMode() {
           0,
           Math.min(1, state.clearing.t / state.clearing.duration)
         );
-        const alpha = 0.15 + (1 - p) * 0.45;
-        const shake = Math.round(Math.sin(state.clearing.t / 18) * (1 - p) * 2);
+        const ease = 1 - (1 - p) * (1 - p);
+        const scaleY = 1 - ease * 0.9;
+        const flash = Math.sin(p * Math.PI);
+        const shake = Math.round(Math.sin(state.clearing.t / 16) * (1 - p) * 3);
+        const cellW = canvas.width / TETRIS.COLS;
 
         ctx.save();
         ctx.translate(shake, 0);
 
-        const cell = canvas.width / TETRIS.COLS;
         for (const rowY of state.clearing.rows) {
-          const py = rowY * cell;
-          ctx.fillStyle = `rgba(34,197,94,${alpha})`;
-          ctx.fillRect(1, py + 1, canvas.width - 2, cell - 2);
+          const py = rowY * cellW;
+          const sweep = p * (canvas.width + cellW * 2) - cellW;
 
-          ctx.strokeStyle = `rgba(34,197,94,${alpha * 1.2})`;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(1, py + 1, canvas.width - 2, cell - 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.08 + flash * 0.22})`;
+          ctx.fillRect(1, py + 1, canvas.width - 2, cellW - 2);
+
+          for (let x = 0; x < TETRIS.COLS; x++) {
+            const t = state.board[rowY][x];
+            if (!t) continue;
+            const fill = TETRIS.COLORS[t];
+            const stroke = `rgba(255,255,255,${0.25 + flash * 0.55})`;
+            drawRectCellScaled(x, rowY, TETRIS.COLS, fill, stroke, 1, scaleY);
+          }
+
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          ctx.fillStyle = `rgba(200,250,255,${0.35 * flash * (1 - p * 0.5)})`;
+          ctx.fillRect(sweep - cellW * 0.7, py + 2, cellW * 1.4, cellW - 4);
+          ctx.restore();
+
+          const rim = 2 + flash * 2.5;
+          const shrink = Math.max(4, (1 - p) * (cellW * 0.35));
+          ctx.fillStyle = `rgba(254,243,199,${0.35 + flash * 0.45})`;
+          ctx.beginPath();
+          ctx.arc(shrink, py + cellW / 2, rim, 0, Math.PI * 2);
+          ctx.arc(canvas.width - shrink, py + cellW / 2, rim, 0, Math.PI * 2);
+          ctx.fill();
         }
 
         ctx.restore();
@@ -1277,7 +1341,8 @@ function createBlockBlastMode() {
     }
   }
 
-  function clearCompletedLines() {
+  /** Returns payload for animation, or null. Does not mutate the board. */
+  function computeLineClearPayload() {
     const fullRows = [];
     const fullCols = [];
 
@@ -1295,7 +1360,8 @@ function createBlockBlastMode() {
       if (ok) fullCols.push(x);
     }
 
-    if (fullRows.length === 0 && fullCols.length === 0) return 0;
+    if (fullRows.length === 0 && fullCols.length === 0) return null;
+
     const clearedCells = new Set();
     for (const y of fullRows) {
       for (let x = 0; x < COLS; x++) clearedCells.add(`${x},${y}`);
@@ -1303,11 +1369,37 @@ function createBlockBlastMode() {
     for (const x of fullCols) {
       for (let y = 0; y < ROWS; y++) clearedCells.add(`${x},${y}`);
     }
+
+    const cells = [];
     for (const key of clearedCells) {
       const [x, y] = key.split(",").map(Number);
+      cells.push({ x, y, color: state.board[y][x] });
+    }
+
+    return {
+      cells,
+      clearedCount: clearedCells.size,
+      rows: fullRows.slice(),
+      cols: fullCols.slice(),
+    };
+  }
+
+  function applyLineClearFromPayload(payload) {
+    for (const { x, y } of payload.cells) {
       state.board[y][x] = null;
     }
-    return clearedCells.size;
+  }
+
+  function finishAnimatedLineClear() {
+    const c = state.clearing;
+    if (!c) return;
+    applyLineClearFromPayload(c);
+    state.score += c.pendingScore;
+    state.clearing = null;
+    updateScore(state.score);
+    updateDashboardStats(1, state.score, 0);
+    if (state.shapes.every((s) => s === null)) refillShapes();
+    if (!hasMovesLeft()) endGame("No moves left.");
   }
 
   function hasAnyPossiblePlacement(shape) {
@@ -1382,11 +1474,60 @@ function createBlockBlastMode() {
     return { col, row };
   }
 
-  function updateDragHover(clientX, clientY) {
+  /** Aim point above the finger (screen px). Used for both preview and drop so they match the same row/column. */
+  function dragPlacementScreenOffset(pointerType, cellPxCss) {
+    const c = Math.max(cellPxCss, 1);
+    if (pointerType === "touch") {
+      return {
+        dx: 0,
+        dy: -Math.max(120, Math.round(c * 4.2)),
+      };
+    }
+    return {
+      dx: 0,
+      dy: -Math.max(48, Math.round(c * 1.6)),
+    };
+  }
+
+  /**
+   * Aim above the finger for visibility, but taper offset near board edges so every row/column
+   * stays reachable (a fixed −120px Y shift made rows ~5–8 / bottom unreachable).
+   */
+  function dragAimClientXY(clientX, clientY, pointerType) {
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return { aimX: clientX, aimY: clientY };
+    }
+    const cellW = rect.width / COLS;
+    const cellH = rect.height / ROWS;
+    const off = dragPlacementScreenOffset(pointerType, cellW);
+
+    const fromBottom = rect.bottom - clientY;
+    const fromTop = clientY - rect.top;
+    const yFactor = Math.min(
+      1,
+      Math.min(fromBottom / (cellH * 3.8), fromTop / (cellH * 2.2))
+    );
+    const aimY = clientY + off.dy * yFactor;
+
+    const fromRight = rect.right - clientX;
+    const fromLeft = clientX - rect.left;
+    const xFactor = Math.min(
+      1,
+      Math.min(fromRight / (cellW * 3.8), fromLeft / (cellW * 2.2))
+    );
+    const aimX = clientX + off.dx * xFactor;
+
+    return { aimX, aimY };
+  }
+
+  function updateDragHover(clientX, clientY, pointerType = "mouse") {
     if (!state.dragging) return;
-    const px = clientX + (state.dragging.pointerOffset?.x || 0);
-    const py = clientY + (state.dragging.pointerOffset?.y || 0);
-    const { col, row } = pointerToBoardCell(px, py);
+    state.dragging.lastClientX = clientX;
+    state.dragging.lastClientY = clientY;
+    state.dragging.lastPointerType = pointerType;
+    const { aimX, aimY } = dragAimClientXY(clientX, clientY, pointerType);
+    const { col, row } = pointerToBoardCell(aimX, aimY);
     const targetCol = col - state.dragging.anchorBlock.x;
     const targetRow = row - state.dragging.anchorBlock.y;
     const valid = shapeFitsAt(state.dragging.shape, targetCol, targetRow);
@@ -1397,21 +1538,17 @@ function createBlockBlastMode() {
     };
   }
 
-  function startDragging(shapeIndex, anchorBlock, pointerType = "mouse") {
+  function startDragging(shapeIndex, anchorBlock) {
     const shape = state.shapes[shapeIndex];
     if (!shape) return;
-    const boardRect = canvas.getBoundingClientRect();
-    const cellPx = boardRect.width > 0 ? boardRect.width / COLS : 32;
-    const touchYOffset = -Math.max(28, Math.round(cellPx * 1.35));
     state.dragging = {
       shapeIndex,
       shape,
       anchorBlock,
-      pointerOffset: {
-        x: 0,
-        y: pointerType === "touch" ? touchYOffset : 0,
-      },
       hover: null,
+      lastClientX: null,
+      lastClientY: null,
+      lastPointerType: "mouse",
     };
     drawShapeSlots();
   }
@@ -1424,11 +1561,24 @@ function createBlockBlastMode() {
       state.score += scoreByPlacedBlocks(drag.shape.blocks.length);
       state.shapes[drag.shapeIndex] = null;
 
-      const cleared = clearCompletedLines();
-      if (cleared > 0) state.score += scoreByClearedCells(cleared);
-
-      if (state.shapes.every((s) => s === null)) refillShapes();
-      if (!hasMovesLeft()) endGame("No moves left.");
+      const clearPayload = computeLineClearPayload();
+      if (clearPayload) {
+        const rowSet = new Set(clearPayload.rows);
+        const colSet = new Set(clearPayload.cols);
+        state.clearing = {
+          t: 0,
+          duration: 400,
+          cells: clearPayload.cells,
+          rows: clearPayload.rows,
+          cols: clearPayload.cols,
+          rowSet,
+          colSet,
+          pendingScore: scoreByClearedCells(clearPayload.clearedCount),
+        };
+      } else {
+        if (state.shapes.every((s) => s === null)) refillShapes();
+        if (!hasMovesLeft()) endGame("No moves left.");
+      }
 
       updateScore(state.score);
       updateDashboardStats(1, state.score, 0);
@@ -1453,6 +1603,7 @@ function createBlockBlastMode() {
         if (activeState.paused || activeState.gameOver) return;
         const shape = state.shapes[shapeIndex];
         if (!shape) return;
+        if (state.clearing) return;
 
         const rect = slotCanvas.getBoundingClientRect();
         const sx = event.clientX - rect.left;
@@ -1484,8 +1635,8 @@ function createBlockBlastMode() {
           }
         }
 
-        startDragging(shapeIndex, { x: best.x, y: best.y }, event.pointerType || "mouse");
-        updateDragHover(event.clientX, event.clientY);
+        startDragging(shapeIndex, { x: best.x, y: best.y });
+        updateDragHover(event.clientX, event.clientY, event.pointerType || "mouse");
         event.preventDefault();
       });
     });
@@ -1493,7 +1644,8 @@ function createBlockBlastMode() {
     window.addEventListener("pointermove", (event) => {
       if (activeState.mode !== "blockblast") return;
       if (!state.dragging) return;
-      updateDragHover(event.clientX, event.clientY);
+      if (state.clearing) return;
+      updateDragHover(event.clientX, event.clientY, event.pointerType || "mouse");
       event.preventDefault();
     });
 
@@ -1501,11 +1653,12 @@ function createBlockBlastMode() {
       if (activeState.mode !== "blockblast") return;
       if (!state.dragging) return;
       const rect = canvas.getBoundingClientRect();
+      const pad = 14;
       const inBoard =
-        event.clientX >= rect.left &&
-        event.clientX <= rect.right &&
-        event.clientY >= rect.top &&
-        event.clientY <= rect.bottom;
+        event.clientX >= rect.left - pad &&
+        event.clientX <= rect.right + pad &&
+        event.clientY >= rect.top - pad &&
+        event.clientY <= rect.bottom + pad;
       if (inBoard) finishDragging();
       else cancelDragging();
       event.preventDefault();
@@ -1522,9 +1675,14 @@ function createBlockBlastMode() {
     ],
     init() {
       resizeCanvasForGrid(COLS, ROWS);
+      // Mobile: layout/CSS width for Block Blast updates after first paint — resize again so board uses full width.
+      requestAnimationFrame(() => {
+        if (activeState.mode === "blockblast") resizeCanvasForGrid(COLS, ROWS);
+      });
       state.board = createEmptyBoard();
       state.score = 0;
       state.dragging = null;
+      state.clearing = null;
       refillShapes();
       bindShapeDragEvents();
       updateScore(0);
@@ -1533,19 +1691,90 @@ function createBlockBlastMode() {
         nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
       }
     },
-    update() {},
+    update(deltaMs) {
+      if (!state.clearing) return;
+      state.clearing.t += deltaMs;
+      if (state.clearing.t >= state.clearing.duration) {
+        finishAnimatedLineClear();
+      }
+    },
     draw() {
       clearCanvas();
+
+      const clearingKeys = state.clearing
+        ? new Set(state.clearing.cells.map((c) => `${c.x},${c.y}`))
+        : null;
 
       for (let y = 0; y < ROWS; y++) {
         for (let x = 0; x < COLS; x++) {
           const cell = state.board[y][x];
           if (!cell) continue;
+          if (clearingKeys && clearingKeys.has(`${x},${y}`)) continue;
           drawRectCell(x, y, COLS, cell, "rgba(15,23,42,0.85)");
         }
       }
 
-      if (state.dragging && state.dragging.hover) {
+      if (state.clearing) {
+        const p = Math.max(
+          0,
+          Math.min(1, state.clearing.t / state.clearing.duration)
+        );
+        const ease = 1 - (1 - p) * (1 - p);
+        const s = 1 - ease * 0.88;
+        const flash = Math.sin(p * Math.PI);
+        const { rowSet, colSet } = state.clearing;
+        const cellW = canvas.width / COLS;
+
+        for (const c of state.clearing.cells) {
+          const sx = colSet.has(c.x) ? s : 1;
+          const sy = rowSet.has(c.y) ? s : 1;
+          const stroke = `rgba(255,255,255,${0.3 + flash * 0.5})`;
+          drawRectCellScaled(c.x, c.y, COLS, c.color, stroke, sx, sy);
+        }
+
+        ctx.save();
+        ctx.globalCompositeOperation = "lighter";
+        const sweep = p * (canvas.width + cellW) - cellW * 0.5;
+        const sweepV = p * (canvas.height + cellW) - cellW * 0.5;
+        for (const ry of state.clearing.rows) {
+          const py = ry * cellW;
+          ctx.fillStyle = `rgba(180,240,255,${0.2 * flash})`;
+          ctx.fillRect(1, py + 1, canvas.width - 2, cellW - 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.3 * flash * (1 - p * 0.45)})`;
+          ctx.fillRect(sweep - cellW * 0.6, py + 3, cellW * 1.2, cellW - 6);
+        }
+        for (const cx of state.clearing.cols) {
+          const px = cx * cellW;
+          ctx.fillStyle = `rgba(255,220,180,${0.18 * flash})`;
+          ctx.fillRect(px + 1, 1, cellW - 2, canvas.height - 2);
+          ctx.fillStyle = `rgba(255,255,255,${0.28 * flash * (1 - p * 0.45)})`;
+          ctx.fillRect(px + 3, sweepV - cellW * 0.6, cellW - 6, cellW * 1.2);
+        }
+        ctx.restore();
+
+        const rim = 2 + flash * 2;
+        const inset = Math.max(2, (1 - p) * cellW * 0.4);
+        ctx.fillStyle = `rgba(254,249,195,${0.3 + flash * 0.35})`;
+        for (const ry of state.clearing.rows) {
+          const cy = ry * cellW + cellW / 2;
+          ctx.beginPath();
+          ctx.arc(inset, cy, rim, 0, Math.PI * 2);
+          ctx.arc(canvas.width - inset, cy, rim, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        for (const cx of state.clearing.cols) {
+          const cxb = cx * cellW + cellW / 2;
+          ctx.beginPath();
+          ctx.arc(cxb, inset, rim, 0, Math.PI * 2);
+          ctx.arc(cxb, canvas.height - inset, rim, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      drawGrid(COLS, ROWS);
+
+      // Preview on-grid at hover — same cells as drop. Hover uses aim point above finger (see updateDragHover).
+      if (state.dragging && state.dragging.hover && !state.clearing) {
         const { col, row, valid } = state.dragging.hover;
         const color = state.dragging.shape.color;
         for (const b of state.dragging.shape.blocks) {
@@ -1556,13 +1785,11 @@ function createBlockBlastMode() {
             x,
             y,
             COLS,
-            valid ? `${color}66` : "rgba(239,68,68,0.45)",
-            valid ? `${color}aa` : "rgba(239,68,68,0.9)"
+            valid ? `${color}cc` : "rgba(239,68,68,0.65)",
+            valid ? `${color}` : "rgba(220,38,38,1)"
           );
         }
       }
-
-      drawGrid(COLS, ROWS);
     },
     onKey() {},
   };
