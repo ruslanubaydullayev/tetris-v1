@@ -21,16 +21,25 @@
     <main class="site-main container">
       <section class="dashboard" id="dashboard" aria-label="Tetris dashboard">
         <div class="dashboard-left">
-          <button id="playGameButton" class="dash-play">Play Game</button>
-         <span id="dashMenuLevel"></span>
+          <div class="game-chooser" aria-label="Choose game">
+            <button id="chooseTetrisButton" class="game-choice active" type="button">
+              <img class="game-choice-thumb" src="static/tetris.png" alt="Tetris" />
+              <span>Tetris</span>
+            </button>
+            <button id="chooseBlockBlastButton" class="game-choice" type="button">
+              <img class="game-choice-thumb" src="static/block-blast.jpeg" alt="Block Blast" />
+              <span>Block Blast</span>
+            </button>
+          </div>
+          <button id="playGameButton" class="dash-play">Play Tetris</button>
+          <span id="dashMenuLevel"></span>
 
           <button id="enableNotificationsButton" class="dash-play dash-notify" type="button">
             Enable notifications
           </button>
-        </div>
 
           <section class="dash-highscores" aria-label="High scores">
-            <h3>High Scores</h3>
+            <h3>High Scores - <span id="leaderboardGameLabel">Tetris</span></h3>
             <ol id="highScoreList">
               <li>0</li>
               <li>0</li>
@@ -113,17 +122,6 @@
                 aria-label="Mobile controls"
               >
                 <div class="mobile-row mobile-row-bottom">
-                  <button
-                    id="mRotate"
-                    class="mctrl"
-                    type="button"
-                    aria-label="Rotate"
-                  >
-                    &#8635;
-                  </button>
-                  <button id="mSoftDrop" class="mctrl" type="button">
-                    Down
-                  </button>
                   <button id="mHardDrop" class="mctrl" type="button" aria-label="Hard drop">
                     Drop
                   </button>
@@ -135,6 +133,14 @@
                   <button id="mRestart" class="mctrl mctrl-secondary" type="button">
                     Restart
                   </button>
+                </div>
+              </div>
+              <div id="blockBlastTray" class="blockblast-tray hidden" aria-label="Block Blast shapes">
+                <h3 class="blockblast-title">Drag shape to board</h3>
+                <div class="blockblast-shapes">
+                  <canvas id="bbShape0" class="bb-shape-canvas" width="90" height="90" aria-label="Block Blast shape 1"></canvas>
+                  <canvas id="bbShape1" class="bb-shape-canvas" width="90" height="90" aria-label="Block Blast shape 2"></canvas>
+                  <canvas id="bbShape2" class="bb-shape-canvas" width="90" height="90" aria-label="Block Blast shape 3"></canvas>
                 </div>
               </div>
             </div>

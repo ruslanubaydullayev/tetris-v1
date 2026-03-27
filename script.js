@@ -14,6 +14,8 @@ const controlsList = document.getElementById("controlsList");
 const dashboard = document.getElementById("dashboard");
 const gameScreen = document.getElementById("gameScreen");
 const playGameButton = document.getElementById("playGameButton");
+const chooseTetrisButton = document.getElementById("chooseTetrisButton");
+const chooseBlockBlastButton = document.getElementById("chooseBlockBlastButton");
 const backToDashboardButton = document.getElementById("backToDashboardButton");
 const enableNotificationsButton = document.getElementById("enableNotificationsButton");
 const dashMenuLevel = document.getElementById("dashMenuLevel");
@@ -23,6 +25,7 @@ const dashCurrentLines = document.getElementById("dashCurrentLines");
 const playLevelValue = document.getElementById("playLevelValue");
 const playLinesValue = document.getElementById("playLinesValue");
 const highScoreList = document.getElementById("highScoreList");
+const leaderboardGameLabel = document.getElementById("leaderboardGameLabel");
 const gameToast = document.getElementById("gameToast");
 const mLeft = document.getElementById("mLeft");
 const mRight = document.getElementById("mRight");
@@ -31,12 +34,20 @@ const mSoftDrop = document.getElementById("mSoftDrop");
 const mHardDrop = document.getElementById("mHardDrop");
 const mPause = document.getElementById("mPause");
 const mRestart = document.getElementById("mRestart");
+const mobileControls = document.getElementById("mobileControls");
 const nameModal = document.getElementById("nameModal");
 const nameForm = document.getElementById("nameForm");
 const nameModalGoToMenuButton = document.getElementById("nameModalGoToMenuButton");
 const playerNameInput = document.getElementById("playerNameInput");
 const nameError = document.getElementById("nameError");
 const nameModalScore = document.getElementById("nameModalScore");
+const blockBlastTray = document.getElementById("blockBlastTray");
+const blockBlastShapeCanvases = [
+  document.getElementById("bbShape0"),
+  document.getElementById("bbShape1"),
+  document.getElementById("bbShape2"),
+];
+const rightPanel = document.querySelector(".right-panel");
 
 const activeState = {
   mode: "blocks",
@@ -48,7 +59,7 @@ const activeState = {
 const modes = {};
 let loopId = null;
 let lastFrameTime = 0;
-const HIGH_SCORE_KEY = "tetrisNBlockHighScores";
+const HIGH_SCORE_KEY_PREFIX = "tetrisNBlockHighScores";
 let toastTimeoutId = null;
 let pendingGameOverMessage = "";
 
@@ -71,6 +82,22 @@ function normalizeUsername(username) {
 function normalizeScoreNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+function normalizeGameMode(mode) {
+  return mode === "blockblast" ? "blockblast" : "blocks";
+}
+
+function getLeaderboardStorageKey(mode = activeState.mode) {
+  return `${HIGH_SCORE_KEY_PREFIX}:${normalizeGameMode(mode)}`;
+}
+
+function getLeaderboardTitle(mode = activeState.mode) {
+  return normalizeGameMode(mode) === "blockblast" ? "Block Blast" : "Tetris";
+}
+
+function isBlockBlastMode(mode = activeState.mode) {
+  return normalizeGameMode(mode) === "blockblast";
 }
 
 function notificationsSupported() {
@@ -183,21 +210,48 @@ async function apiEnsureUser(username) {
   }
 }
 
-async function apiPostScore(username, score) {
+async function apiPostScore(username, score, mode = activeState.mode) {
+  if (isBlockBlastMode(mode)) {
+    return apiJson("/api/block-blast/scores", {
+      method: "POST",
+      body: { username, score },
+    });
+  }
   return apiJson("/api/scores", { method: "POST", body: { username, score } });
 }
 
-async function apiFetchTopScores(limit = 10) {
-  return apiJson(`/api/scores/top?limit=${encodeURIComponent(limit)}`);
+async function apiFetchTopScores(limit = 10, mode = activeState.mode) {
+  if (isBlockBlastMode(mode)) {
+    return apiJson(
+      `/api/scores/top?limit=${encodeURIComponent(limit)}&game=block_blast`
+    );
+  }
+  // Tetris leaderboard
+  return apiJson(`/api/scores/top?limit=${encodeURIComponent(limit)}&game=tetris`);
 }
 
-async function apiFetchUserBest(username) {
+async function apiFetchScoreRarity(score, mode = activeState.mode) {
+  const game = isBlockBlastMode(mode) ? "blockblast" : "tetris";
   return apiJson(
-    `/api/users/${encodeURIComponent(username)}/best`
+    `/api/scores/rarity?score=${encodeURIComponent(score)}&game=${encodeURIComponent(game)}`
   );
 }
 
-async function apiFetchUserScores(username, limit = 20) {
+async function apiFetchUserBest(username, mode = activeState.mode) {
+  if (isBlockBlastMode(mode)) {
+    return apiJson(`/api/block-blast/users/${encodeURIComponent(username)}/best`);
+  }
+  return apiJson(`/api/users/${encodeURIComponent(username)}/best`);
+}
+
+async function apiFetchUserScores(username, limit = 20, mode = activeState.mode) {
+  if (isBlockBlastMode(mode)) {
+    return apiJson(
+      `/api/block-blast/users/${encodeURIComponent(username)}/scores?limit=${encodeURIComponent(
+        limit
+      )}`
+    );
+  }
   return apiJson(
     `/api/users/${encodeURIComponent(username)}/scores?limit=${encodeURIComponent(
       limit
@@ -246,7 +300,7 @@ async function refreshLeaderboardFromApi(limit = 10) {
   showLeaderboardLoading();
 
   try {
-    const data = await apiFetchTopScores(limit);
+    const data = await apiFetchTopScores(limit, activeState.mode);
     if (requestId !== leaderboardRefreshRequestId) return;
     renderHighScoresFromApiResults(data?.results ?? []);
   } catch (err) {
@@ -258,11 +312,14 @@ async function refreshLeaderboardFromApi(limit = 10) {
 }
 
 async function syncUserScoreWithApi(username, score) {
-  // Spec-listed order: ensure user, post score, then fetch best & history.
-  await apiEnsureUser(username);
-  const postRes = await apiPostScore(username, score);
-  const bestRes = await apiFetchUserBest(username);
-  const scoresRes = await apiFetchUserScores(username, 20);
+  const mode = activeState.mode;
+  // Tetris has /api/users create endpoint; Block Blast API is separate.
+  if (!isBlockBlastMode(mode)) {
+    await apiEnsureUser(username);
+  }
+  const postRes = await apiPostScore(username, score, mode);
+  const bestRes = await apiFetchUserBest(username, mode);
+  const scoresRes = await apiFetchUserScores(username, 20, mode);
 
   const bestScore = normalizeScoreNumber(
     bestRes?.bestScore ?? postRes?.bestScore
@@ -362,9 +419,9 @@ function updateDashboardStats(level, score, lines) {
   playLinesValue.textContent = String(lines);
 }
 
-function readHighScores() {
+function readHighScores(mode = activeState.mode) {
   try {
-    const raw = localStorage.getItem(HIGH_SCORE_KEY);
+    const raw = localStorage.getItem(getLeaderboardStorageKey(mode));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
@@ -385,8 +442,8 @@ function readHighScores() {
   }
 }
 
-function renderHighScores() {
-  const scores = readHighScores();
+function renderHighScores(mode = activeState.mode) {
+  const scores = readHighScores(mode);
   const filled = scores.concat(
     Array.from({ length: Math.max(0, 10 - scores.length) }, () => ({
       name: "---",
@@ -414,14 +471,17 @@ function closeNameModal() {
   nameModal.style.display = "none";
 }
 
-function saveHighScore(score, playerName) {
-  const scores = readHighScores();
+function saveHighScore(score, playerName, mode = activeState.mode) {
+  const scores = readHighScores(mode);
   scores.push({
     name: playerName,
     score: Number(score) || 0,
   });
   scores.sort((a, b) => b.score - a.score);
-  localStorage.setItem(HIGH_SCORE_KEY, JSON.stringify(scores.slice(0, 10)));
+  localStorage.setItem(
+    getLeaderboardStorageKey(mode),
+    JSON.stringify(scores.slice(0, 10))
+  );
 }
 
 function showGameToast(message) {
@@ -1133,7 +1193,350 @@ function createRaceMode() {
   };
 }
 
+function createBlockBlastMode() {
+  const state = {};
+  const COLS = 8;
+  const ROWS = 8;
+  const SHAPE_COLORS = ["#38bdf8", "#a855f7", "#22c55e", "#f97316", "#ef4444"];
+  const SHAPE_TEMPLATES = [
+    [[0, 0]],
+    [[0, 0], [1, 0]],
+    [[0, 0], [0, 1]],
+    [[0, 0], [1, 0], [2, 0]],
+    [[0, 0], [0, 1], [0, 2]],
+    [[0, 0], [1, 0], [0, 1]],
+    [[0, 0], [1, 0], [2, 0], [1, 1]],
+    [[0, 0], [0, 1], [1, 1], [1, 2]],
+    [[0, 0], [1, 0], [1, 1], [2, 1]],
+    [[0, 0], [1, 0], [2, 0], [3, 0]],
+    [[0, 0], [0, 1], [0, 2], [0, 3]],
+    [[0, 0], [1, 0], [0, 1], [1, 1]],
+    [[0, 0], [1, 0], [2, 0], [2, 1]],
+    [[0, 0], [0, 1], [0, 2], [1, 2]],
+  ];
+
+  function createEmptyBoard() {
+    return Array.from({ length: ROWS }, () => new Array(COLS).fill(null));
+  }
+
+  function randomShape() {
+    const template =
+      SHAPE_TEMPLATES[Math.floor(Math.random() * SHAPE_TEMPLATES.length)];
+    const color = SHAPE_COLORS[Math.floor(Math.random() * SHAPE_COLORS.length)];
+    return {
+      blocks: template.map(([x, y]) => ({ x, y })),
+      color,
+    };
+  }
+
+  function refillShapes() {
+    state.shapes = [randomShape(), randomShape(), randomShape()];
+    drawShapeSlots();
+  }
+
+  function shapeFitsAt(shape, col, row) {
+    for (const b of shape.blocks) {
+      const x = col + b.x;
+      const y = row + b.y;
+      if (x < 0 || x >= COLS || y < 0 || y >= ROWS) return false;
+      if (state.board[y][x]) return false;
+    }
+    return true;
+  }
+
+  function placeShape(shape, col, row) {
+    for (const b of shape.blocks) {
+      state.board[row + b.y][col + b.x] = shape.color;
+    }
+  }
+
+  function clearCompletedLines() {
+    const fullRows = [];
+    const fullCols = [];
+
+    for (let y = 0; y < ROWS; y++) {
+      if (state.board[y].every(Boolean)) fullRows.push(y);
+    }
+    for (let x = 0; x < COLS; x++) {
+      let ok = true;
+      for (let y = 0; y < ROWS; y++) {
+        if (!state.board[y][x]) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) fullCols.push(x);
+    }
+
+    if (fullRows.length === 0 && fullCols.length === 0) return 0;
+    const clearedCells = new Set();
+    for (const y of fullRows) {
+      for (let x = 0; x < COLS; x++) clearedCells.add(`${x},${y}`);
+    }
+    for (const x of fullCols) {
+      for (let y = 0; y < ROWS; y++) clearedCells.add(`${x},${y}`);
+    }
+    for (const key of clearedCells) {
+      const [x, y] = key.split(",").map(Number);
+      state.board[y][x] = null;
+    }
+    return clearedCells.size;
+  }
+
+  function hasAnyPossiblePlacement(shape) {
+    for (let y = 0; y < ROWS; y++) {
+      for (let x = 0; x < COLS; x++) {
+        if (shapeFitsAt(shape, x, y)) return true;
+      }
+    }
+    return false;
+  }
+
+  function hasMovesLeft() {
+    return state.shapes.some((shape) => shape && hasAnyPossiblePlacement(shape));
+  }
+
+  function scoreByPlacedBlocks(n) {
+    return n * 10;
+  }
+
+  function scoreByClearedCells(n) {
+    return n * 20;
+  }
+
+  function drawShapePreviewToCanvas(slotCanvas, shape, isDragging = false) {
+    if (!slotCanvas) return;
+    const slotCtx = slotCanvas.getContext("2d");
+    slotCtx.clearRect(0, 0, slotCanvas.width, slotCanvas.height);
+    slotCtx.fillStyle = "#eef4ff";
+    slotCtx.fillRect(0, 0, slotCanvas.width, slotCanvas.height);
+
+    if (!shape) return;
+
+    const minX = Math.min(...shape.blocks.map((b) => b.x));
+    const maxX = Math.max(...shape.blocks.map((b) => b.x));
+    const minY = Math.min(...shape.blocks.map((b) => b.y));
+    const maxY = Math.max(...shape.blocks.map((b) => b.y));
+    const shapeW = maxX - minX + 1;
+    const shapeH = maxY - minY + 1;
+    const cell = Math.min(
+      slotCanvas.width / (shapeW + 1.5),
+      slotCanvas.height / (shapeH + 1.5)
+    );
+    const offsetX = (slotCanvas.width - shapeW * cell) / 2 - minX * cell;
+    const offsetY = (slotCanvas.height - shapeH * cell) / 2 - minY * cell;
+
+    for (const b of shape.blocks) {
+      const x = Math.round(offsetX + b.x * cell);
+      const y = Math.round(offsetY + b.y * cell);
+      slotCtx.fillStyle = isDragging ? `${shape.color}99` : shape.color;
+      slotCtx.strokeStyle = "rgba(15,23,42,0.9)";
+      slotCtx.lineWidth = 1;
+      slotCtx.fillRect(x + 1, y + 1, Math.max(2, cell - 2), Math.max(2, cell - 2));
+      slotCtx.strokeRect(x + 1, y + 1, Math.max(2, cell - 2), Math.max(2, cell - 2));
+    }
+  }
+
+  function drawShapeSlots() {
+    blockBlastShapeCanvases.forEach((slotCanvas, index) => {
+      const shape = state.shapes[index];
+      const draggingThis =
+        state.dragging && state.dragging.shapeIndex === index;
+      drawShapePreviewToCanvas(slotCanvas, shape, draggingThis);
+    });
+  }
+
+  function pointerToBoardCell(clientX, clientY) {
+    const rect = canvas.getBoundingClientRect();
+    const cellW = rect.width / COLS;
+    const cellH = rect.height / ROWS;
+    const col = Math.floor((clientX - rect.left) / cellW);
+    const row = Math.floor((clientY - rect.top) / cellH);
+    return { col, row };
+  }
+
+  function updateDragHover(clientX, clientY) {
+    if (!state.dragging) return;
+    const { col, row } = pointerToBoardCell(clientX, clientY);
+    const targetCol = col - state.dragging.anchorBlock.x;
+    const targetRow = row - state.dragging.anchorBlock.y;
+    const valid = shapeFitsAt(state.dragging.shape, targetCol, targetRow);
+    state.dragging.hover = {
+      col: targetCol,
+      row: targetRow,
+      valid,
+    };
+  }
+
+  function startDragging(shapeIndex, anchorBlock) {
+    const shape = state.shapes[shapeIndex];
+    if (!shape) return;
+    state.dragging = {
+      shapeIndex,
+      shape,
+      anchorBlock,
+      hover: null,
+    };
+    drawShapeSlots();
+  }
+
+  function finishDragging() {
+    if (!state.dragging) return;
+    const drag = state.dragging;
+    if (drag.hover && drag.hover.valid) {
+      placeShape(drag.shape, drag.hover.col, drag.hover.row);
+      state.score += scoreByPlacedBlocks(drag.shape.blocks.length);
+      state.shapes[drag.shapeIndex] = null;
+
+      const cleared = clearCompletedLines();
+      if (cleared > 0) state.score += scoreByClearedCells(cleared);
+
+      if (state.shapes.every((s) => s === null)) refillShapes();
+      if (!hasMovesLeft()) endGame("No moves left.");
+
+      updateScore(state.score);
+      updateDashboardStats(1, state.score, 0);
+    }
+    state.dragging = null;
+    drawShapeSlots();
+  }
+
+  function cancelDragging() {
+    state.dragging = null;
+    drawShapeSlots();
+  }
+
+  function bindShapeDragEvents() {
+    if (state.dragEventsBound) return;
+    state.dragEventsBound = true;
+
+    blockBlastShapeCanvases.forEach((slotCanvas, shapeIndex) => {
+      if (!slotCanvas) return;
+      slotCanvas.addEventListener("pointerdown", (event) => {
+        if (activeState.mode !== "blockblast") return;
+        if (activeState.paused || activeState.gameOver) return;
+        const shape = state.shapes[shapeIndex];
+        if (!shape) return;
+
+        const rect = slotCanvas.getBoundingClientRect();
+        const sx = event.clientX - rect.left;
+        const sy = event.clientY - rect.top;
+
+        // Pick nearest block as drag anchor for intuitive placement.
+        let best = shape.blocks[0];
+        let bestDist = Infinity;
+        const minX = Math.min(...shape.blocks.map((b) => b.x));
+        const maxX = Math.max(...shape.blocks.map((b) => b.x));
+        const minY = Math.min(...shape.blocks.map((b) => b.y));
+        const maxY = Math.max(...shape.blocks.map((b) => b.y));
+        const shapeW = maxX - minX + 1;
+        const shapeH = maxY - minY + 1;
+        const cell = Math.min(
+          slotCanvas.width / (shapeW + 1.5),
+          slotCanvas.height / (shapeH + 1.5)
+        );
+        const offsetX = (slotCanvas.width - shapeW * cell) / 2 - minX * cell;
+        const offsetY = (slotCanvas.height - shapeH * cell) / 2 - minY * cell;
+
+        for (const b of shape.blocks) {
+          const bx = offsetX + b.x * cell + cell / 2;
+          const by = offsetY + b.y * cell + cell / 2;
+          const d = (bx - sx) * (bx - sx) + (by - sy) * (by - sy);
+          if (d < bestDist) {
+            bestDist = d;
+            best = b;
+          }
+        }
+
+        startDragging(shapeIndex, { x: best.x, y: best.y });
+        updateDragHover(event.clientX, event.clientY);
+        event.preventDefault();
+      });
+    });
+
+    window.addEventListener("pointermove", (event) => {
+      if (activeState.mode !== "blockblast") return;
+      if (!state.dragging) return;
+      updateDragHover(event.clientX, event.clientY);
+      event.preventDefault();
+    });
+
+    window.addEventListener("pointerup", (event) => {
+      if (activeState.mode !== "blockblast") return;
+      if (!state.dragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const inBoard =
+        event.clientX >= rect.left &&
+        event.clientX <= rect.right &&
+        event.clientY >= rect.top &&
+        event.clientY <= rect.bottom;
+      if (inBoard) finishDragging();
+      else cancelDragging();
+      event.preventDefault();
+    });
+  }
+
+  return {
+    title: "Block Blast",
+    controls: [
+      "<li><strong>Drag & Drop</strong>: Place one of 3 shapes on the board</li>",
+      "<li><strong>Complete rows/columns</strong>: They clear automatically</li>",
+      "<li><strong>Goal</strong>: Keep placing as long as moves exist</li>",
+      "<li><strong>P</strong>: Pause | <strong>R</strong>: Restart</li>",
+    ],
+    init() {
+      resizeCanvasForGrid(COLS, ROWS);
+      state.board = createEmptyBoard();
+      state.score = 0;
+      state.dragging = null;
+      refillShapes();
+      bindShapeDragEvents();
+      updateScore(0);
+      updateDashboardStats(1, 0, 0);
+      if (nextCtx) {
+        nextCtx.clearRect(0, 0, nextCanvas.width, nextCanvas.height);
+      }
+    },
+    update() {},
+    draw() {
+      clearCanvas();
+
+      for (let y = 0; y < ROWS; y++) {
+        for (let x = 0; x < COLS; x++) {
+          const cell = state.board[y][x];
+          if (!cell) continue;
+          drawRectCell(x, y, COLS, cell, "rgba(15,23,42,0.85)");
+        }
+      }
+
+      if (state.dragging && state.dragging.hover) {
+        const { col, row, valid } = state.dragging.hover;
+        const color = state.dragging.shape.color;
+        for (const b of state.dragging.shape.blocks) {
+          const x = col + b.x;
+          const y = row + b.y;
+          if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
+          drawRectCell(
+            x,
+            y,
+            COLS,
+            valid ? `${color}66` : "rgba(239,68,68,0.45)",
+            valid ? `${color}aa` : "rgba(239,68,68,0.9)"
+          );
+        }
+      }
+
+      drawGrid(COLS, ROWS);
+    },
+    onKey() {},
+  };
+}
+
 function setMode(mode) {
+  const prevMode = activeState.mode;
+  if (prevMode && modes[prevMode] && typeof modes[prevMode].destroy === "function") {
+    modes[prevMode].destroy();
+  }
   activeState.mode = mode;
   activeState.paused = false;
   activeState.gameOver = false;
@@ -1145,6 +1548,30 @@ function setMode(mode) {
   game.init();
   if (gameTitle) gameTitle.textContent = game.title;
   controlsList.innerHTML = game.controls.join("");
+
+  if (blockBlastTray) {
+    blockBlastTray.classList.toggle("hidden", mode !== "blockblast");
+  }
+  if (rightPanel) {
+    rightPanel.classList.toggle("hidden", mode === "blockblast");
+  }
+  if (mobileControls) {
+    mobileControls.classList.toggle("hidden", mode === "blockblast");
+  }
+  if (playGameButton) {
+    playGameButton.textContent = mode === "blockblast" ? "Play Block Blast" : "Play Tetris";
+  }
+  if (leaderboardGameLabel) {
+    leaderboardGameLabel.textContent = getLeaderboardTitle(mode);
+  }
+  if (chooseTetrisButton) {
+    chooseTetrisButton.classList.toggle("active", mode === "blocks");
+  }
+  if (chooseBlockBlastButton) {
+    chooseBlockBlastButton.classList.toggle("active", mode === "blockblast");
+  }
+  renderHighScores(mode);
+  void refreshLeaderboardFromApi(10);
 }
 
 function resetCurrentMode() {
@@ -1162,10 +1589,12 @@ function frame(timestamp) {
   lastFrameTime = timestamp;
   const game = modes[activeState.mode];
 
-  if (!activeState.paused && !activeState.gameOver) {
+  if (!gameScreen.classList.contains("hidden") && !activeState.paused && !activeState.gameOver) {
     game.update(delta);
   }
-  game.draw();
+  if (!gameScreen.classList.contains("hidden")) {
+    game.draw();
+  }
   loopId = requestAnimationFrame(frame);
 }
 
@@ -1226,7 +1655,7 @@ nameForm.addEventListener("submit", (event) => {
 
   const playerName = rawName.slice(0, 16).toUpperCase();
   const score = activeState.score;
-  saveHighScore(score, playerName);
+  saveHighScore(score, playerName, activeState.mode);
   localStorage.setItem(LAST_SYNCED_USERNAME_KEY, playerName);
   closeNameModal();
   showOverlay(
@@ -1238,7 +1667,7 @@ nameForm.addEventListener("submit", (event) => {
   // Sync leaderboard in the background.
   void (async () => {
     try {
-      const { bestScore, historyScores } = await syncUserScoreWithApi(
+      const { bestScore } = await syncUserScoreWithApi(
         playerName,
         score
       );
@@ -1246,27 +1675,12 @@ nameForm.addEventListener("submit", (event) => {
       // If the player restarted quickly, don't overwrite the new screen.
       if (!activeState.gameOver) return;
 
-      const topData = await apiFetchTopScores(10);
-      const topResults = Array.isArray(topData?.results)
-        ? topData.results
-        : [];
-
-      const lastBestScore =
-        topResults.length > 0
-          ? normalizeScoreNumber(
-              topResults[topResults.length - 1]?.bestScore ??
-                topResults[topResults.length - 1]?.score ??
-                0
-            )
-          : 0;
-      const isTop10 = topResults.length > 0 && bestScore >= lastBestScore;
-      const top10Text = isTop10
-        ? "Great, you are one of top-10 players 😇"
-        : "Try one more time to become top players 😅";
+      const rarityData = await apiFetchScoreRarity(bestScore, activeState.mode);
+      const rarityText = String(rarityData?.message || "").trim();
 
       showOverlay(
         "Game over",
-        `${pendingGameOverMessage} You earned ${bestScore} point. ${top10Text}. Just share to friend to challenge them. Press R to restart.`,
+        `${pendingGameOverMessage} You earned ${bestScore} point.${rarityText ? ` ${rarityText}` : ""} Just share to friend to challenge them. Press R to restart.`,
         { showPlay: false }
       );
 
@@ -1286,6 +1700,18 @@ playGameButton.addEventListener("click", () => {
   gameScreen.classList.remove("hidden");
   resetCurrentMode();
 });
+
+if (chooseTetrisButton) {
+  chooseTetrisButton.addEventListener("click", () => {
+    setMode("blocks");
+  });
+}
+
+if (chooseBlockBlastButton) {
+  chooseBlockBlastButton.addEventListener("click", () => {
+    setMode("blockblast");
+  });
+}
 
 backToDashboardButton.addEventListener("click", () => {
   goToMenu();
@@ -1507,7 +1933,7 @@ window.addEventListener(
     const inControls =
       target &&
       typeof target.closest === "function" &&
-      target.closest(".mobile-controls");
+      (target.closest(".mobile-controls") || target.closest(".blockblast-tray"));
 
     if (!inCanvas && !inControls) return;
     event.preventDefault();
@@ -1516,10 +1942,9 @@ window.addEventListener(
 );
 
 modes.blocks = createBlocksMode();
+modes.blockblast = createBlockBlastMode();
 closeNameModal();
 setMode("blocks");
-showLeaderboardLoading(); // wait for remote leaderboard
-void refreshLeaderboardFromApi(10); // remote leaderboard
 if (loopId) cancelAnimationFrame(loopId);
 loopId = requestAnimationFrame(frame);
 
