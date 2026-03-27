@@ -37,7 +37,7 @@ const mRestart = document.getElementById("mRestart");
 const mobileControls = document.getElementById("mobileControls");
 const nameModal = document.getElementById("nameModal");
 const nameForm = document.getElementById("nameForm");
-const nameModalGoToMenuButton = document.getElementById("nameModalGoToMenuButton");
+const nameModalRestartButton = document.getElementById("nameModalRestartButton");
 const playerNameInput = document.getElementById("playerNameInput");
 const nameError = document.getElementById("nameError");
 const nameModalScore = document.getElementById("nameModalScore");
@@ -48,6 +48,19 @@ const blockBlastShapeCanvases = [
   document.getElementById("bbShape2"),
 ];
 const rightPanel = document.querySelector(".right-panel");
+
+if (playerNameInput) {
+  playerNameInput.addEventListener("input", () => {
+    const validated = validateUsername(playerNameInput.value);
+    if (validated.ok) {
+      if (nameError) {
+        nameError.hidden = true;
+        nameError.textContent = "";
+      }
+      playerNameInput.classList.remove("input-invalid");
+    }
+  });
+}
 
 const activeState = {
   mode: "blocks",
@@ -82,6 +95,17 @@ function normalizeUsername(username) {
 function normalizeScoreNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? Math.floor(n) : 0;
+}
+
+function validateUsername(raw) {
+  const s = String(raw ?? "");
+  if (s !== s.trim()) return { ok: false, message: "No leading/trailing spaces." };
+  if (/\s/.test(s)) return { ok: false, message: "Username cannot contain spaces." };
+  if (s.length < 3 || s.length > 20)
+    return { ok: false, message: "Username must be 3-20 characters." };
+  if (!/^[A-Za-z]/.test(s))
+    return { ok: false, message: "Username must start with a letter." };
+  return { ok: true, value: s };
 }
 
 function normalizeGameMode(mode) {
@@ -231,7 +255,7 @@ async function apiFetchTopScores(limit = 10, mode = activeState.mode) {
 }
 
 async function apiFetchScoreRarity(score, mode = activeState.mode) {
-  const game = isBlockBlastMode(mode) ? "blockblast" : "tetris";
+  const game = isBlockBlastMode(mode) ? "block_blast" : "tetris";
   return apiJson(
     `/api/scores/rarity?score=${encodeURIComponent(score)}&game=${encodeURIComponent(game)}`
   );
@@ -460,6 +484,8 @@ function openNameModal(score, message) {
   pendingGameOverMessage = message;
   nameModalScore.textContent = String(score);
   nameError.hidden = true;
+  nameError.textContent = "";
+  playerNameInput.classList.remove("input-invalid");
   playerNameInput.value = localStorage.getItem(LAST_SYNCED_USERNAME_KEY) || "";
   nameModal.hidden = false;
   nameModal.style.display = "flex";
@@ -547,8 +573,9 @@ function endGame(message) {
   const remembered = String(
     localStorage.getItem(LAST_SYNCED_USERNAME_KEY) || ""
   ).trim();
-  if (remembered && /^[A-Za-z]/.test(remembered)) {
-    playerNameInput.value = remembered;
+  const validated = validateUsername(remembered);
+  if (validated.ok) {
+    playerNameInput.value = validated.value;
     nameForm.requestSubmit();
     return;
   }
@@ -1599,7 +1626,15 @@ function frame(timestamp) {
 }
 
 window.addEventListener("keydown", (event) => {
-  if (!nameModal.hidden) return;
+  if (!nameModal.hidden) {
+    const key = event.key.toLowerCase();
+    if (key === "r") {
+      event.preventDefault();
+      closeNameModal();
+      resetCurrentMode();
+    }
+    return;
+  }
   if (gameScreen.classList.contains("hidden")) return;
   const key = event.key.toLowerCase();
   if (["arrowup", "arrowdown", "arrowleft", "arrowright", " "].includes(key)) {
@@ -1629,11 +1664,12 @@ if (goToMenuButton) {
   });
 }
 
-if (nameModalGoToMenuButton) {
-  nameModalGoToMenuButton.addEventListener("click", (event) => {
+if (nameModalRestartButton) {
+  nameModalRestartButton.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
-    goToMenu();
+    closeNameModal();
+    resetCurrentMode();
   });
 }
 
@@ -1646,14 +1682,17 @@ if (overlayPlayButton) {
 
 nameForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const rawName = playerNameInput.value.trim();
-  if (!rawName || !/^[A-Za-z]/.test(rawName)) {
+  const rawName = playerNameInput.value;
+  const validated = validateUsername(rawName);
+  if (!validated.ok) {
+    nameError.textContent = validated.message;
     nameError.hidden = false;
+    playerNameInput.classList.add("input-invalid");
     playerNameInput.focus();
     return;
   }
 
-  const playerName = rawName.slice(0, 16).toUpperCase();
+  const playerName = validated.value.slice(0, 20).toUpperCase();
   const score = activeState.score;
   saveHighScore(score, playerName, activeState.mode);
   localStorage.setItem(LAST_SYNCED_USERNAME_KEY, playerName);
@@ -1667,7 +1706,7 @@ nameForm.addEventListener("submit", (event) => {
   // Sync leaderboard in the background.
   void (async () => {
     try {
-      const { bestScore } = await syncUserScoreWithApi(
+      await syncUserScoreWithApi(
         playerName,
         score
       );
@@ -1675,12 +1714,13 @@ nameForm.addEventListener("submit", (event) => {
       // If the player restarted quickly, don't overwrite the new screen.
       if (!activeState.gameOver) return;
 
-      const rarityData = await apiFetchScoreRarity(bestScore, activeState.mode);
+      // Rarity message should describe the last game score (not bestScore).
+      const rarityData = await apiFetchScoreRarity(score, activeState.mode);
       const rarityText = String(rarityData?.message || "").trim();
 
       showOverlay(
         "Game over",
-        `${pendingGameOverMessage} You earned ${bestScore} point.${rarityText ? ` ${rarityText}` : ""} Just share to friend to challenge them. Press R to restart.`,
+        `${pendingGameOverMessage} You earned ${score} point.${rarityText ? ` ${rarityText}` : ""} Just share to friend to challenge them. Press R to restart.`,
         { showPlay: false }
       );
 

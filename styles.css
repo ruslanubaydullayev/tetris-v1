@@ -673,6 +673,11 @@ canvas {
   font: inherit;
 }
 
+.name-form input.input-invalid {
+  border-color: #b91c1c;
+  outline: 3px solid rgba(185, 28, 28, 0.25);
+}
+
 .name-error {
   margin: 0;
   color: #b91c1c;
