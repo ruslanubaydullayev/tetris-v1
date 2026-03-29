@@ -907,7 +907,7 @@ function createBlocksMode() {
       "<li><strong>Up</strong>: Rotate piece</li>",
       "<li><strong>Down</strong>: Soft drop</li>",
       "<li><strong>Space</strong>: Hard drop</li>",
-      "<li><strong>P</strong>: Pause | <strong>R</strong>: Restart</li>",
+      "<li><strong>P</strong>: Pause | use <strong>Restart</strong> button for new game</li>",
     ],
     init() {
       resizeCanvasForGrid(TETRIS.COLS, TETRIS.ROWS);
@@ -1101,7 +1101,7 @@ function createTanksMode() {
     controls: [
       "<li><strong>Arrows / WASD</strong>: Move tank (forward, back, left, right)</li>",
       "<li><strong>Space</strong>: Shoot in facing direction</li>",
-      "<li><strong>P</strong>: Pause | <strong>R</strong>: Restart</li>",
+      "<li><strong>P</strong>: Pause | use <strong>Restart</strong> button for new game</li>",
     ],
     init() {
       resizeCanvasForGrid(COLS, ROWS);
@@ -1274,7 +1274,7 @@ function createRaceMode() {
     controls: [
       "<li><strong>Left / Right</strong>: Change lane</li>",
       "<li><strong>Down</strong>: Boost score speed</li>",
-      "<li><strong>P</strong>: Pause | <strong>R</strong>: Restart</li>",
+      "<li><strong>P</strong>: Pause | use <strong>Restart</strong> button for new game</li>",
     ],
     init() {
       resizeCanvasForGrid(LANES, ROWS);
@@ -1726,7 +1726,7 @@ function createBlockBlastMode() {
       "<li><strong>Drag & Drop</strong>: Place one of 3 shapes on the board</li>",
       "<li><strong>Complete rows/columns</strong>: They clear automatically</li>",
       "<li><strong>Goal</strong>: Keep placing as long as moves exist</li>",
-      "<li><strong>P</strong>: Pause | <strong>R</strong>: Restart</li>",
+      "<li><strong>P</strong>: Pause | use <strong>Restart</strong> button for new game</li>",
     ],
     init() {
       resizeCanvasForGrid(COLS, ROWS);
@@ -1922,12 +1922,7 @@ function frame(timestamp) {
 
 window.addEventListener("keydown", (event) => {
   if (!nameModal.hidden) {
-    const key = event.key.toLowerCase();
-    if (key === "r") {
-      event.preventDefault();
-      closeNameModal();
-      void resetCurrentMode();
-    }
+    // Do not handle keys here: "R" was restarting the game while typing names like "rainy".
     return;
   }
   if (gameScreen.classList.contains("hidden")) return;
@@ -1936,10 +1931,6 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
   if (key === "p") return setPaused(!activeState.paused);
-  if (key === "r") {
-    void resetCurrentMode();
-    return;
-  }
   if (activeState.paused || activeState.gameOver) return;
   modes[activeState.mode].onKey(key, event);
 });
@@ -1997,7 +1988,7 @@ nameForm.addEventListener("submit", (event) => {
   closeNameModal();
   showOverlay(
     "Game over",
-    `${pendingGameOverMessage} You earned ${score} point. Just share to friend to challenge them. Press R to restart.`,
+    `${pendingGameOverMessage} You earned ${score} point. Just share to friend to challenge them. Use Restart for a new game.`,
     { showPlay: false }
   );
 
@@ -2018,7 +2009,7 @@ nameForm.addEventListener("submit", (event) => {
 
       showOverlay(
         "Game over",
-        `${pendingGameOverMessage} You earned ${score} point.${rarityText ? ` ${rarityText}` : ""} Just share to friend to challenge them. Press R to restart.`,
+        `${pendingGameOverMessage} You earned ${score} point.${rarityText ? ` ${rarityText}` : ""} Just share to friend to challenge them. Use Restart for a new game.`,
         { showPlay: false }
       );
 
