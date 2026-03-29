@@ -76,6 +76,9 @@ const HIGH_SCORE_KEY_PREFIX = "tetrisNBlockHighScores";
 let toastTimeoutId = null;
 let pendingGameOverMessage = "";
 
+/** Server-issued id for the current round only; cleared when a new round/session starts. */
+let currentRoundSessionId = null;
+
 let leftHoldTimer = null;
 let rightHoldTimer = null;
 let softDropHoldTimer = null;
@@ -213,12 +216,58 @@ async function apiJson(path, options = {}) {
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(
+    const err = new Error(
       `API request failed: ${method} ${path} (${res.status}) ${text}`
     );
+    err.status = res.status;
+    err.responseBody = text;
+    throw err;
   }
 
   return res.json();
+}
+
+function parseApiErrorBody(bodyText) {
+  const raw = String(bodyText ?? "").trim();
+  if (!raw) return "";
+  try {
+    const j = JSON.parse(raw);
+    return String(j.error ?? j.message ?? j.detail ?? "").trim();
+  } catch {
+    return raw.length > 160 ? `${raw.slice(0, 157)}…` : raw;
+  }
+}
+
+function userFacingScoreSubmitError(status, bodyText) {
+  const parsed = parseApiErrorBody(bodyText);
+  if (status === 409) return parsed || "This round was already submitted.";
+  if (status === 400)
+    return parsed || "Score not accepted. Start a new game and try again.";
+  return "";
+}
+
+function sessionGameApiName(mode = activeState.mode) {
+  return isBlockBlastMode(mode) ? "block_blast" : "tetris";
+}
+
+async function startGameSessionForActiveRound() {
+  currentRoundSessionId = null;
+  const game = sessionGameApiName();
+  try {
+    const data = await apiJson("/api/game/session", {
+      method: "POST",
+      body: { game },
+    });
+    const sid = data?.sessionId ?? data?.session_id;
+    if (sid != null && String(sid).trim() !== "") {
+      currentRoundSessionId = String(sid);
+    } else {
+      showGameToast("Could not start game session", 3200);
+    }
+  } catch (err) {
+    console.warn("Game session start failed:", err);
+    showGameToast("Could not start game session", 3200);
+  }
 }
 
 async function apiEnsureUser(username) {
@@ -235,13 +284,19 @@ async function apiEnsureUser(username) {
 }
 
 async function apiPostScore(username, score, mode = activeState.mode) {
+  const sessionId = currentRoundSessionId;
+  const sessionField =
+    sessionId != null && sessionId !== "" ? { sessionId } : {};
   if (isBlockBlastMode(mode)) {
     return apiJson("/api/block-blast/scores", {
       method: "POST",
-      body: { username, score },
+      body: { username, score, ...sessionField },
     });
   }
-  return apiJson("/api/scores", { method: "POST", body: { username, score } });
+  return apiJson("/api/scores", {
+    method: "POST",
+    body: { username, score, game: "tetris", ...sessionField },
+  });
 }
 
 async function apiFetchTopScores(limit = 10, mode = activeState.mode) {
@@ -516,14 +571,14 @@ function saveHighScore(score, playerName, mode = activeState.mode) {
   );
 }
 
-function showGameToast(message) {
+function showGameToast(message, durationMs = 1400) {
   if (!gameToast) return;
   gameToast.textContent = message;
   gameToast.hidden = false;
   if (toastTimeoutId) clearTimeout(toastTimeoutId);
   toastTimeoutId = setTimeout(() => {
     gameToast.hidden = true;
-  }, 1400);
+  }, durationMs);
 }
 
 function showOverlay(title, message, opts = {}) {
@@ -1838,7 +1893,7 @@ function setMode(mode) {
   void refreshLeaderboardFromApi(10);
 }
 
-function resetCurrentMode() {
+async function resetCurrentMode() {
   const game = modes[activeState.mode];
   activeState.paused = false;
   activeState.gameOver = false;
@@ -1846,6 +1901,9 @@ function resetCurrentMode() {
   hideOverlay();
   if (mPause) mPause.textContent = "Pause";
   game.init();
+  if (gameScreen && !gameScreen.classList.contains("hidden")) {
+    await startGameSessionForActiveRound();
+  }
 }
 
 function frame(timestamp) {
@@ -1868,7 +1926,7 @@ window.addEventListener("keydown", (event) => {
     if (key === "r") {
       event.preventDefault();
       closeNameModal();
-      resetCurrentMode();
+      void resetCurrentMode();
     }
     return;
   }
@@ -1878,7 +1936,10 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
   }
   if (key === "p") return setPaused(!activeState.paused);
-  if (key === "r") return resetCurrentMode();
+  if (key === "r") {
+    void resetCurrentMode();
+    return;
+  }
   if (activeState.paused || activeState.gameOver) return;
   modes[activeState.mode].onKey(key, event);
 });
@@ -1890,7 +1951,7 @@ window.addEventListener("keyup", (event) => {
 });
 
 restartButton.addEventListener("click", () => {
-  resetCurrentMode();
+  void resetCurrentMode();
 });
 
 if (goToMenuButton) {
@@ -1906,7 +1967,7 @@ if (nameModalRestartButton) {
     event.preventDefault();
     event.stopPropagation();
     closeNameModal();
-    resetCurrentMode();
+    void resetCurrentMode();
   });
 }
 
@@ -1965,7 +2026,14 @@ nameForm.addEventListener("submit", (event) => {
     } catch (err) {
       console.warn("Failed to sync score to API:", err);
       if (!activeState.gameOver) return;
-      showGameToast("Leaderboard sync failed");
+      const status = err?.status;
+      const bodyText = err?.responseBody ?? "";
+      if (status === 400 || status === 409) {
+        showGameToast(userFacingScoreSubmitError(status, bodyText), 4200);
+        currentRoundSessionId = null;
+      } else {
+        showGameToast("Leaderboard sync failed");
+      }
       await refreshLeaderboardFromApi(10);
     }
   })();
@@ -1975,7 +2043,7 @@ playGameButton.addEventListener("click", () => {
   closeNameModal();
   dashboard.classList.add("hidden");
   gameScreen.classList.remove("hidden");
-  resetCurrentMode();
+  void resetCurrentMode();
 });
 
 if (chooseTetrisButton) {
@@ -2171,7 +2239,7 @@ if (mPause) {
 if (mRestart) {
   mRestart.addEventListener("click", () => {
     if (!gameIsInteractive()) return;
-    resetCurrentMode();
+    void resetCurrentMode();
   });
 }
 
